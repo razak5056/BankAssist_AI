@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#176f51">
+  <meta name="description" content="BankAssist AI — Secure Banking Sign-in">
+  <title>BankAssist AI — Sign In</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+  <style>
+    body {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #f6f7f3;
+      padding: 20px;
+      font-family: "DM Sans", sans-serif;
+    }
+    .login-container {
+      width: 100%;
+      max-width: 440px;
+      margin: auto;
+    }
+    .login-brand-header {
+      text-align: center;
+      margin-bottom: 24px;
+    }
+    .login-brand-header .brand {
+      justify-content: center;
+      font-size: 28px;
+      text-decoration: none;
+      display: inline-flex;
+    }
+    .login-card-single {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 14px;
+      padding: 36px 32px;
+      box-shadow: 0 20px 35px -10px rgba(0, 0, 0, 0.06);
+    }
+    .login-card-single h1 {
+      margin: 0 0 6px;
+      font-size: 1.45rem;
+      font-weight: 700;
+      color: #0f172a;
+      letter-spacing: -0.5px;
+    }
+    .login-card-single p.subtitle {
+      margin: 0 0 24px;
+      font-size: 0.875rem;
+      color: #64748b;
+      line-height: 1.5;
+    }
+    .login-footer-info {
+      text-align: center;
+      margin-top: 24px;
+      font-size: 0.78rem;
+      color: #94a3b8;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+  </style>
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div class="login-container">
+    <div class="login-brand-header">
+      <a class="brand" href="/" aria-label="BankAssist home">
+        <span class="brand-mark" aria-hidden="true">B</span>
+        <span>bankassist<span class="brand-period">.</span>ai</span>
+      </a>
+    </div>
+
+    <!-- ONLY ONE LOGIN SCREEN -->
+    <main class="login-card-single">
+      <h1>Sign in to BankAssist</h1>
+      <p class="subtitle">Enter your email and password to securely access your banking workspace.</p>
+
+      <form id="single-login-form" novalidate>
+        <label class="field">
+          <span>Email Address</span>
+          <input id="login-email" name="email" type="email" autocomplete="email" required placeholder="Enter your registered email">
+        </label>
+
+        <label class="field">
+          <span>Password</span>
+          <input id="login-password" name="password" type="password" autocomplete="current-password" minlength="6" required placeholder="Enter your password">
+        </label>
+
+        <p class="form-message" id="form-message" role="alert" style="margin-top: 6px; min-height: 18px;"></p>
+
+        <button class="primary-button full-button" id="login-submit-btn" type="submit" style="margin-top: 10px;">
+          Sign in securely <span aria-hidden="true">→</span>
+        </button>
+      </form>
+    </main>
+
+    <div class="login-footer-info">
+      <span>🔒</span> Protected with 256-bit encrypted banking session
+    </div>
+  </div>
+</body>
+</html>

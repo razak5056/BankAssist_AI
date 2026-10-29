@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#1e293b">
+  <meta name="description" content="BankAssist AI Banking Support Executive Dashboard — View assigned tickets, investigate customer disputes, review evidence, update status, and manage SLA escalations across L1/L2/L3 tiers.">
+  <title>BankAssist — Banking Support Executive Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/support.js" defer></script>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Main navigation">
+      <a class="brand" href="/" aria-label="BankAssist home">
+        <span class="brand-mark" style="background: #2563eb;" aria-hidden="true">S</span>
+        <span>bankassist<span class="brand-period" style="color:#60a5fa;">.</span></span>
+      </a>
+      <div style="font-size: 11px; font-weight: 700; color: #2563eb; margin-top: 4px; padding-left: 9px; letter-spacing: 0.5px;">SUPPORT EXECUTIVE DASHBOARD</div>
+
+      <div class="nav-caption">SUPPORT WORKSPACE</div>
+      <nav class="nav-list">
+        <a class="nav-link active" id="nav-support-overview" href="#support-overview">
+          <span class="nav-icon" aria-hidden="true">▦</span> Overview & Metrics
+        </a>
+        <a class="nav-link" id="nav-support-queue" href="#support-queue">
+          <span class="nav-icon" aria-hidden="true">▤</span> Ticket Queue
+          <span class="nav-count" id="queue-nav-badge">0</span>
+        </a>
+        <a class="nav-link" id="nav-support-escalations" href="#support-escalations">
+          <span class="nav-icon" aria-hidden="true">↗</span> Escalations
+          <span class="nav-count" id="escalation-nav-badge">0</span>
+        </a>
+      </nav>
+
+      <div class="sidebar-bottom">
+        <div class="help-card" style="border-color: #dbeafe; background: #eff6ff;">
+          <div class="help-icon" style="background:#bfdbfe; color:#1d4ed8;" aria-hidden="true">🎧</div>
+          <strong>Support Team Mapping</strong>
+          <p style="font-size: 10px; line-height: 1.4; color: #1e3a8a;">
+            • <b>L1 Support:</b> UPI, ATM, Cards, Account, KYC<br>
+            • <b>L2 Support:</b> Complex & Unresolved issues<br>
+            • <b>L3 Manager:</b> Serious cases & SLA overdue
+          </p>
+          <span class="help-status" style="color:#1d4ed8;"><i style="background:#2563eb;"></i> SLA Engine Active</span>
+        </div>
+        <div class="sidebar-footer">
+          BankAssist AI Support Desk<br>
+          <a href="/" onclick="sessionStorage.clear(); localStorage.clear(); window.location.href='/'; return false;" style="color:#ef4444; font-size:11px; text-decoration:underline; font-weight:600; margin-top:4px; display:inline-block;">Sign out ⎋</a>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main-area">
+      <header class="topbar">
+        <div class="breadcrumb">
+          <span>BankAssist</span>
+          <span class="crumb-separator">/</span>
+          <strong id="breadcrumb-page">Banking Support Executive Dashboard</strong>
+        </div>
+        <div class="topbar-right">
+          <span class="secure-label"><span aria-hidden="true" style="color:#2563eb;">◆</span> Support Active Session</span>
+          <button class="avatar-button" id="avatar-button" type="button" style="background:#eff6ff; color:#1d4ed8; border-color:#bfdbfe;" aria-label="Support Profile">S</button>
+          <button class="text-button" id="logout-button" type="button" onclick="sessionStorage.clear(); localStorage.clear(); window.location.href='/';" title="Sign out of support desk">Sign out ⎋</button>
+        </div>
+      </header>
+
+      <section class="content" id="main-content">
+        <!-- Authenticated Support Workspace -->
+        <div id="support-workspace">
+          <div class="welcome-row">
+            <div>
+              <div class="eyebrow"><span class="eyebrow-line" style="background:#2563eb;"></span> BANKING SUPPORT EXECUTIVE DASHBOARD (HLD)</div>
+              <h1 id="welcome-title">Support Desk: <em id="executive-tier-title" style="color:#2563eb;">L1 Support</em></h1>
+              <p class="welcome-copy" id="welcome-copy">View assigned tickets, investigate customer complaints with unverified evidence, and manage status or escalations.</p>
+            </div>
+            <div class="date-chip" style="border-color:#bfdbfe;"><span class="date-dot" style="background:#2563eb;"></span> <span id="header-tier-chip">L1 EXECUTIVE WORKSPACE</span></div>
+          </div>
+
+          <!-- Section 1: Support Team Mapping Card (Direct HLD Requirement) -->
+          <section class="admin-panel" style="margin-bottom: 24px; background: linear-gradient(to right, #f8fafc, #eff6ff); border: 1px solid #bfdbfe;">
+            <div class="accounts-list-heading">
+              <div>
+                <div class="eyebrow" style="color:#2563eb;"><span class="eyebrow-line" style="background:#2563eb;"></span> HLD ARCHITECTURE: SUPPORT TEAM MAPPING</div>
+                <h3 style="margin: 4px 0 0; color: #1e3a8a;">Resolution Tiers & Responsibility Hierarchy</h3>
+              </div>
+              <span class="coming-soon" style="background:#dbeafe; color:#1d4ed8; border-color:#bfdbfe;">SLA MONITORED</span>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; margin-top: 14px;">
+              <div style="background:#fff; padding: 14px; border-radius: 8px; border: 1px solid #e2e8f0;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                  <strong style="color: #0369a1; font-size: 13px;">L1 - Support Executives</strong>
+                  <span class="ticket-badge-pill" style="background:#e0f2fe; color:#0369a1;">4 Specialists</span>
+                </div>
+                <p style="font-size: 11px; color: #475569; margin: 0; line-height: 1.5;">
+                  • <b>1. Rajesh Kumar:</b> UPI & Digital Payments<br>
+                  • <b>2. Suresh Patel:</b> ATM & Cash Withdrawal<br>
+                  • <b>3. Kavita Rao:</b> Account & Balance<br>
+                  • <b>4. Deepak Verma:</b> Account Access & KYC
+                </p>
+              </div>
+              <div style="background:#fff; padding: 14px; border-radius: 8px; border: 1px solid #e2e8f0;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                  <strong style="color: #6b21a8; font-size: 13px;">L2 - Senior Support</strong>
+                  <span class="ticket-badge-pill" style="background:#fae8ff; color:#6b21a8;">2 Specialists</span>
+                </div>
+                <p style="font-size: 11px; color: #475569; margin: 0; line-height: 1.5;">
+                  • <b>1. Anita Sharma:</b> Complex dispute specialist<br>
+                  • <b>2. Rohit Mehra:</b> Cross-category review<br>
+                  • Unresolved technical debit errors
+                </p>
+              </div>
+              <div style="background:#fff; padding: 14px; border-radius: 8px; border: 1px solid #e2e8f0;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                  <strong style="color: #991b1b; font-size: 13px;">L3 - Support Manager</strong>
+                  <span class="ticket-badge-pill" style="background:#fee2e2; color:#991b1b;">1 Redressal</span>
+                </div>
+                <p style="font-size: 11px; color: #475569; margin: 0; line-height: 1.5;">
+                  • <b>1. Vikram Malhotra:</b> Grievance Manager<br>
+                  • High priority / serious cases<br>
+                  • SLA overdue / regulatory breaches
+                </p>
+              </div>
+            </div>
+          </section>
+
+          <!-- 4 L1 Banking Support Executives Live Roster (Direct HLD Requirement) -->
+          <section class="admin-panel" id="l1-supporters-section" style="margin-bottom: 24px; border: 1px solid #cbd5e1;">
+            <div class="accounts-list-heading">
+              <div>
+                <div class="eyebrow" style="color:#0369a1;"><span class="eyebrow-line" style="background:#0369a1;"></span> HLD SPECIFICATION: 4 L1 SUPPORT EXECUTIVES</div>
+                <h3 style="margin: 4px 0 0; color: #0f172a;">L1 Banking Support Executives Team</h3>
+              </div>
+              <span class="ticket-badge-pill" style="background:#e0f2fe; color:#0369a1; font-weight:700;">4 EXECUTIVES ON DUTY</span>
+            </div>
+            <div id="l1-team-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; margin-top: 14px;">
+              <!-- Populated dynamically via JS -->
+            </div>
+          </section>
+
+          <!-- L2 Senior Support & Specialists Live Roster (Direct HLD Requirement: 2 Persons) -->
+          <section class="admin-panel" id="l2-supporters-section" style="margin-bottom: 24px; border: 1px solid #e9d5ff; background: linear-gradient(to right, #faf5ff, #fff);">
+            <div class="accounts-list-heading">
+              <div>
+                <div class="eyebrow" style="color:#7e22ce;"><span class="eyebrow-line" style="background:#7e22ce;"></span> HLD SPECIFICATION: L2 SENIOR SUPPORT & SPECIALISTS (2 PERSONS)</div>
+                <h3 style="margin: 4px 0 0; color: #581c87;">L2 Senior Support & Cross-Category Specialists</h3>
+              </div>
+              <span class="ticket-badge-pill" style="background:#fae8ff; color:#7e22ce; font-weight:700;">2 SENIOR SPECIALISTS ON DUTY</span>
+            </div>
+            <div id="l2-team-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; margin-top: 14px;">
+              <!-- Populated dynamically via JS -->
+            </div>
+          </section>
+
+          <!-- Section 2: Metric Summary Cards -->
+          <section class="summary-grid" aria-label="Support Summary">
+            <article class="summary-card">
+              <div class="summary-top"><span>ASSIGNED TO ME</span><span class="card-icon blue-icon" aria-hidden="true">▤</span></div>
+              <div class="metric-value" id="support-assigned-count">0</div>
+              <p class="metric-caption">Active disputes assigned to your desk</p>
+              <div class="metric-foot"><span class="soft-dot green-dot"></span> In Progress</div>
+            </article>
+
+            <article class="summary-card">
+              <div class="summary-top"><span>AWAITING RESPONSE</span><span class="card-icon green-icon" aria-hidden="true">◷</span></div>
+              <div class="metric-value" id="support-queue-count">0</div>
+              <p class="metric-caption">Total disputes in your tier queue</p>
+              <div class="metric-foot"><span class="soft-dot" style="background:#2563eb;"></span> SLA Monitored</div>
+            </article>
+
+            <article class="summary-card">
+              <div class="summary-top"><span>ESCALATED CASES</span><span class="card-icon violet-icon" aria-hidden="true">↗</span></div>
+              <div class="metric-value" id="support-escalations-count">0</div>
+              <p class="metric-caption">Cases routed to higher support tier</p>
+              <div class="metric-foot"><span class="soft-dot" style="background:#9333ea;"></span> Escalation Logged</div>
+            </article>
+          </section>
+
+          <!-- Section 3: View Assigned Tickets (HLD: View assigned tickets) -->
+          <section class="admin-panel support-queue-panel" id="support-queue" style="margin-top: 36px;">
+            <div class="accounts-list-heading">
+              <div>
+                <div class="eyebrow" style="color:#2563eb;"><span class="eyebrow-line" style="background:#2563eb;"></span> VIEW ASSIGNED TICKETS (HLD)</div>
+                <h2 style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                  <span>Active Desk Tickets:</span>
+                  <span id="active-desk-name" style="color:#2563eb; font-weight:700;">Executive Desk</span>
+                </h2>
+              </div>
+              <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                <select id="category-filter" style="font-size:12px; padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; background:#fff;">
+                  <option value="ALL">All Categories</option>
+                  <option value="UPI & Digital Payments">UPI & Digital Payments</option>
+                  <option value="ATM & Cash Withdrawal">ATM & Cash Withdrawal</option>
+                  <option value="Debit & Credit Cards">Debit & Credit Cards</option>
+                  <option value="Account & Balance">Account & Balance</option>
+                  <option value="Account Access & KYC">Account Access & KYC</option>
+                </select>
+                <button class="inline-action" id="refresh-support-queue" type="button">Refresh Queue <span aria-hidden="true">↻</span></button>
+              </div>
+            </div>
+            <div class="table-scroll">
+              <table class="accounts-table">
+                <thead>
+                  <tr>
+                    <th>TICKET #</th>
+                    <th>CUSTOMER</th>
+                    <th>CATEGORY</th>
+                    <th>PRIORITY</th>
+                    <th>STATUS</th>
+                    <th>SLA TARGET</th>
+                    <th>EVIDENCE</th>
+                    <th>ACTIONS</th>
+                  </tr>
+                </thead>
+                <tbody id="support-queue-table-body">
+                  <tr><td colspan="8" class="empty-table">Loading support ticket queue…</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <!-- Section 4: Escalation Management Workspace -->
+          <section class="admin-panel support-queue-panel" id="support-escalations" style="margin-top: 36px;">
+            <div class="accounts-list-heading">
+              <div>
+                <div class="eyebrow" style="color:#9333ea;"><span class="eyebrow-line" style="background:#9333ea;"></span> ESCALATION WORKSPACE</div>
+                <h2 style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                  <span>Escalated Disputes:</span>
+                  <span id="escalation-active-desk-name" style="color:#9333ea; font-weight:700;">Active Desk</span>
+                </h2>
+              </div>
+              <button class="inline-action" id="refresh-escalations-queue" type="button">Refresh Escalations <span aria-hidden="true">↻</span></button>
+            </div>
+            <div class="table-scroll">
+              <table class="accounts-table">
+                <thead>
+                  <tr>
+                    <th>TICKET #</th>
+                    <th>CUSTOMER</th>
+                    <th>CATEGORY</th>
+                    <th>PRIORITY</th>
+                    <th>ESCALATION STATUS</th>
+                    <th>ASSIGNED DESK</th>
+                    <th>ACTIONS</th>
+                  </tr>
+                </thead>
+                <tbody id="support-escalations-table-body">
+                  <tr><td colspan="7" class="empty-table">No escalated tickets found.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <footer class="page-footer" style="margin-top: 36px;">
+            <span>BankAssist AI · Banking Support Executive Dashboard</span>
+            <span>Real-time L1, L2, L3 Routing & SLA Management</span>
+          </footer>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Ticket Investigation & Action Modal (HLD: Investigate and respond / Update ticket status) -->
+  <div id="investigation-modal" class="modal-overlay hidden" style="position:fixed;inset:0;background:rgba(15,23,42,0.65);backdrop-filter:blur(4px);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;">
+    <div class="modal-content" style="background:#fff;border-radius:12px;max-width:740px;width:100%;max-height:92vh;overflow-y:auto;box-shadow:0 25px 50px -12px rgba(0,0,0,0.25);padding:24px;border:1px solid #cbd5e1;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:1px solid #e2e8f0;padding-bottom:14px;margin-bottom:16px;">
+        <div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <h2 id="modal-ticket-num" style="margin:0;font-size:1.3rem;color:#0f172a;font-weight:700;">TK-XXXXX</h2>
+            <span id="modal-priority-badge" class="ticket-badge-pill">Normal</span>
+            <span id="modal-status-badge" class="ticket-badge-pill">Assigned</span>
+          </div>
+          <p id="modal-ticket-title" style="margin:4px 0 0;color:#64748b;font-size:0.95rem;">Customer Issue Title</p>
+        </div>
+        <button type="button" id="close-investigation-modal" style="background:none;border:none;font-size:1.75rem;cursor:pointer;color:#94a3b8;line-height:1;">&times;</button>
+      </div>
+
+      <!-- Customer Details & Metadata Grid -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;background:#f8fafc;padding:14px;border-radius:8px;margin-bottom:16px;font-size:0.875rem;border:1px solid #e2e8f0;">
+        <div><strong style="color:#475569;">Customer:</strong> <span id="modal-customer-name">—</span></div>
+        <div><strong style="color:#475569;">Email:</strong> <span id="modal-customer-email">—</span></div>
+        <div><strong style="color:#475569;">Category:</strong> <span id="modal-category">—</span></div>
+        <div><strong style="color:#475569;">SLA Target:</strong> <span id="modal-sla">—</span></div>
+        <div><strong style="color:#475569;">Assigned Tier:</strong> <span id="modal-tier">—</span></div>
+        <div><strong style="color:#475569;">Unverified Evidence:</strong> <span id="modal-evidence-link">—</span></div>
+      </div>
+
+      <!-- Customer Complaint -->
+      <div style="margin-bottom:16px;">
+        <h4 style="margin:0 0 6px;font-size:0.85rem;text-transform:uppercase;letter-spacing:0.05em;color:#475569;">Customer Complaint & Description</h4>
+        <div id="modal-description" style="background:#fff;border:1px solid #e2e8f0;padding:12px;border-radius:8px;font-size:0.9rem;color:#1e293b;line-height:1.5;white-space:pre-wrap;"></div>
+      </div>
+
+      <!-- AI Agent Summary & Regulatory Turnaround -->
+      <div style="margin-bottom:16px;">
+        <h4 style="margin:0 0 6px;font-size:0.85rem;text-transform:uppercase;letter-spacing:0.05em;color:#0369a1;">AI Agent Analysis & Policy Guidance</h4>
+        <div id="modal-ai-summary" style="background:#f0f9ff;border:1px solid #bae6fd;padding:12px;border-radius:8px;font-size:0.875rem;color:#0369a1;line-height:1.5;"></div>
+      </div>
+
+      <!-- Audit Log History -->
+      <div style="margin-bottom:20px;">
+        <h4 style="margin:0 0 6px;font-size:0.85rem;text-transform:uppercase;letter-spacing:0.05em;color:#475569;">Audit Trail & Event History</h4>
+        <div id="modal-history-list" style="max-height:140px;overflow-y:auto;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;font-size:0.8rem;color:#475569;"></div>
+      </div>
+
+      <!-- Update Ticket Status (HLD: Update ticket status) -->
+      <div style="border-top:1px solid #e2e8f0;padding-top:16px;">
+        <h4 style="margin:0 0 8px;font-size:0.85rem;text-transform:uppercase;letter-spacing:0.05em;color:#15803d;">Investigation & Status Update</h4>
+        <form id="investigation-action-form" style="display:flex;flex-direction:column;gap:12px;">
+          <input type="hidden" id="modal-ticket-id" />
+          <div style="display:grid;grid-template-columns:1fr 2fr;gap:12px;">
+            <div>
+              <label style="font-size:0.8rem;font-weight:600;color:#475569;display:block;margin-bottom:4px;">Update Status</label>
+              <select id="modal-status-select" style="width:100%;padding:8px;border:1px solid #cbd5e1;border-radius:6px;font-size:0.875rem;">
+                <option value="In Progress">In Progress</option>
+                <option value="Resolved">Resolved</option>
+                <option value="Closed">Closed</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size:0.8rem;font-weight:600;color:#475569;display:block;margin-bottom:4px;">Investigation / Resolution Notes</label>
+              <input type="text" id="modal-notes-input" placeholder="e.g. Verified with NPCI reversal logs; credit initiated." style="width:100%;padding:8px;border:1px solid #cbd5e1;border-radius:6px;font-size:0.875rem;" />
+            </div>
+          </div>
+          <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:6px;">
+            <button type="button" id="modal-escalate-btn" class="action-btn-sm action-btn-escalate" style="padding:8px 16px;">Escalate to Senior Tier ↗</button>
+            <button type="submit" id="modal-save-btn" class="action-btn-sm action-btn-resolve" style="padding:8px 16px;">Save Status Update</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
+

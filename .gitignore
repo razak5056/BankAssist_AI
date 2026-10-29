@@ -1,0 +1,12 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+*.db
+*.sqlite
+*.sqlite3
+data/chroma_db/
+uploads/evidence/
+.pytest_cache/
+.coverage
+htmlcov/
