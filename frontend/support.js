@@ -9,6 +9,7 @@ const logoutButton = document.querySelector("#logout-button");
 const avatarButton = document.querySelector("#avatar-button");
 
 let allQueueTickets = [];
+let allEscalatedTickets = [];
 
 function setMessage(message, type = "error") {
   if (!formMessage) return;
@@ -25,6 +26,86 @@ function escapeHtml(value) {
     '"': "&quot;",
     "'": "&#39;",
   })[character]);
+}
+
+function formatSlaInfo(slaHours, deadlineStr, status) {
+  const hours = slaHours || 24;
+  if (!deadlineStr) {
+    return {
+      hours,
+      deadlineText: `${hours} hours from creation`,
+      badgeText: `${hours}h SLA`,
+      bg: "#f1f5f9",
+      color: "#475569",
+      status: "Normal",
+    };
+  }
+
+  const deadlineDate = new Date(deadlineStr);
+  const deadlineText = deadlineDate.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  if (status === "Resolved" || status === "Closed") {
+    return {
+      hours,
+      deadlineText,
+      badgeText: "✓ Completed",
+      bg: "#ecfdf5",
+      color: "#059669",
+      status: "Resolved",
+    };
+  }
+
+  const now = new Date();
+  const diffMs = deadlineDate.getTime() - now.getTime();
+  const diffHours = diffMs / (1000 * 60 * 60);
+
+  if (diffHours < 0) {
+    const overdueHours = Math.abs(Math.round(diffHours));
+    return {
+      hours,
+      deadlineText,
+      badgeText: `🚨 Breached (${overdueHours}h overdue)`,
+      bg: "#fee2e2",
+      color: "#991b1b",
+      status: "Breached",
+    };
+  } else if (diffHours <= 4) {
+    const remainingMins = Math.max(1, Math.round(diffHours * 60));
+    return {
+      hours,
+      deadlineText,
+      badgeText: `⚠️ Critical (${remainingMins}m left)`,
+      bg: "#fef3c7",
+      color: "#b45309",
+      status: "Critical",
+    };
+  } else if (diffHours <= 12) {
+    const remHours = Math.round(diffHours);
+    return {
+      hours,
+      deadlineText,
+      badgeText: `⏱️ ${remHours}h left`,
+      bg: "#fef9c3",
+      color: "#a16207",
+      status: "Approaching",
+    };
+  } else {
+    const remHours = Math.round(diffHours);
+    return {
+      hours,
+      deadlineText,
+      badgeText: `✓ On Track (${remHours}h left)`,
+      bg: "#dcfce7",
+      color: "#15803d",
+      status: "On Track",
+    };
+  }
 }
 
 async function readResponse(response) {
@@ -141,16 +222,29 @@ async function loadSupportQueue() {
   const queueTbody = document.querySelector("#support-queue-table-body");
   const escTbody = document.querySelector("#support-escalations-table-body");
   if (queueTbody) queueTbody.innerHTML = '<tr><td colspan="8" class="empty-table">Loading tickets…</td></tr>';
+  if (escTbody) escTbody.innerHTML = '<tr><td colspan="7" class="empty-table">Loading escalations…</td></tr>';
 
   try {
-    const res = await fetch("/tickets/support/queue?desk_only=true", {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    const tickets = await readResponse(res);
+    const scopeFilter = document.querySelector("#escalation-scope-filter")?.value || "desk";
+    const escDeskOnly = scopeFilter === "desk";
+
+    const [queueRes, escRes] = await Promise.all([
+      fetch("/tickets/support/queue?desk_only=true", {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      fetch(`/tickets/support/escalated?desk_only=${escDeskOnly}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+    ]);
+
+    const tickets = await readResponse(queueRes);
+    const escalatedTickets = await readResponse(escRes);
+
     allQueueTickets = tickets;
+    allEscalatedTickets = escalatedTickets;
 
     const assignedCount = tickets.filter((t) => !["Resolved", "Closed"].includes(t.status)).length;
-    const escCount = tickets.filter((t) => t.status.toLowerCase().includes("escalated")).length;
+    const escCount = escalatedTickets.length;
 
     document.querySelector("#support-assigned-count").textContent = String(assignedCount);
     document.querySelector("#support-queue-count").textContent = String(tickets.length);
@@ -162,6 +256,7 @@ async function loadSupportQueue() {
     renderEscalationsTable();
   } catch (err) {
     if (queueTbody) queueTbody.innerHTML = `<tr><td colspan="8" class="empty-table">${escapeHtml(err.message)}</td></tr>`;
+    if (escTbody) escTbody.innerHTML = `<tr><td colspan="7" class="empty-table">${escapeHtml(err.message)}</td></tr>`;
   }
 }
 
@@ -184,7 +279,7 @@ function renderQueueTable() {
 
   for (const t of tickets) {
     const row = document.createElement("tr");
-    const slaFormatted = t.sla_deadline ? new Date(t.sla_deadline).toLocaleString() : `${t.sla_hours} hrs`;
+    const slaInfo = formatSlaInfo(t.sla_hours, t.sla_deadline, t.status);
     const canEscalate = !t.status.includes("Resolved") && !t.status.includes("Closed") && t.assigned_tier !== "L3 Support Manager";
     const canResolve = !t.status.includes("Resolved") && !t.status.includes("Closed");
 
@@ -206,10 +301,21 @@ function renderQueueTable() {
     row.innerHTML = `
       <td><a href="#" data-action="investigate" data-id="${t.id}" style="color:#1a4d2e;text-decoration:underline;font-weight:700;">${escapeHtml(t.ticket_number)}</a></td>
       <td>${escapeHtml(t.customer_name || "Customer")}</td>
-      <td><span class="ticket-badge-pill" style="background:#f1f5f9;">${escapeHtml(t.category)}</span></td>
+      <td>
+        <span class="ticket-badge-pill" style="background:#f1f5f9;">${escapeHtml(t.category)}</span>
+        <span class="ticket-badge-pill" style="background:#fee2e2; color:#991b1b; font-size:10px; font-weight:700;">${escapeHtml(t.case_type || "Complaint")}</span>
+      </td>
       <td><span class="ticket-badge-pill badge-priority-${escapeHtml(t.priority)}">${escapeHtml(t.priority)}</span></td>
       <td><span class="ticket-badge-pill badge-status-${escapeHtml(t.status.replace(/\s+/g, ""))}">${escapeHtml(t.status)}</span></td>
-      <td><small>${escapeHtml(slaFormatted)}</small></td>
+      <td>
+        <div style="line-height:1.35;">
+          <strong style="color:#0f172a; font-size:12px; display:block;">📅 ${escapeHtml(slaInfo.deadlineText)}</strong>
+          <div style="display:flex; gap:4px; align-items:center; margin-top:2px; flex-wrap:wrap;">
+            <span class="ticket-badge-pill" style="font-size:10px; padding:2px 6px; background:#f1f5f9; color:#334155;">${slaInfo.hours}h SLA</span>
+            <span class="ticket-badge-pill" style="font-size:10px; padding:2px 6px; background:${slaInfo.bg}; color:${slaInfo.color}; font-weight:700;">${escapeHtml(slaInfo.badgeText)}</span>
+          </div>
+        </div>
+      </td>
       <td>${evidenceHtml}</td>
       <td>${actionsHtml}</td>
     `;
@@ -221,159 +327,256 @@ function renderEscalationsTable() {
   const tbody = document.querySelector("#support-escalations-table-body");
   if (!tbody) return;
 
-  const escalated = allQueueTickets.filter((t) => t.status.toLowerCase().includes("escalated"));
+  const escalated = allEscalatedTickets;
   tbody.replaceChildren();
 
   if (!escalated.length) {
-    tbody.innerHTML = '<tr><td colspan="7" class="empty-table">No escalated tickets in this tier queue.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" class="empty-table">No escalated tickets in this tier queue.</td></tr>';
     return;
   }
 
   for (const t of escalated) {
     const row = document.createElement("tr");
+    const slaInfo = formatSlaInfo(t.sla_hours, t.sla_deadline, t.status);
+    const canResolve = !t.status.includes("Resolved") && !t.status.includes("Closed");
+
+    let actionsHtml = `<button class="action-btn-sm" style="background:#f1f5f9;color:#0f172a;border:1px solid #cbd5e1;margin-right:4px;" data-action="investigate" data-id="${t.id}">🔍 Investigate</button> `;
+    if (canResolve) {
+      actionsHtml += `<button class="action-btn-sm action-btn-resolve" data-action="resolve" data-id="${t.id}">Resolve</button>`;
+    } else {
+      actionsHtml += `<small style="color:#7d8781;">Completed</small>`;
+    }
+
     row.innerHTML = `
       <td><a href="#" data-action="investigate" data-id="${t.id}" style="color:#1a4d2e;text-decoration:underline;font-weight:700;">${escapeHtml(t.ticket_number)}</a></td>
       <td>${escapeHtml(t.customer_name || "Customer")}</td>
-      <td><span class="ticket-badge-pill" style="background:#f1f5f9;">${escapeHtml(t.category)}</span></td>
+      <td>
+        <span class="ticket-badge-pill" style="background:#f1f5f9;">${escapeHtml(t.category)}</span>
+        <span class="ticket-badge-pill" style="background:#fee2e2; color:#991b1b; font-size:10px; font-weight:700;">${escapeHtml(t.case_type || "Complaint")}</span>
+      </td>
       <td><span class="ticket-badge-pill badge-priority-${escapeHtml(t.priority)}">${escapeHtml(t.priority)}</span></td>
       <td><span class="ticket-badge-pill badge-status-Escalated">${escapeHtml(t.status)}</span></td>
       <td>${escapeHtml(t.assigned_to_name || t.assigned_tier)}</td>
       <td>
-        <button class="action-btn-sm" style="background:#f1f5f9;color:#0f172a;border:1px solid #cbd5e1;margin-right:4px;" data-action="investigate" data-id="${t.id}">🔍 Investigate</button>
-        <button class="action-btn-sm action-btn-resolve" data-action="resolve" data-id="${t.id}">Resolve</button>
+        <div style="line-height:1.35;">
+          <strong style="color:#0f172a; font-size:12px; display:block;">📅 ${escapeHtml(slaInfo.deadlineText)}</strong>
+          <div style="display:flex; gap:4px; align-items:center; margin-top:2px; flex-wrap:wrap;">
+            <span class="ticket-badge-pill" style="font-size:10px; padding:2px 6px; background:#f1f5f9; color:#334155;">${slaInfo.hours}h SLA</span>
+            <span class="ticket-badge-pill" style="font-size:10px; padding:2px 6px; background:${slaInfo.bg}; color:${slaInfo.color}; font-weight:700;">${escapeHtml(slaInfo.badgeText)}</span>
+          </div>
+        </div>
       </td>
+      <td>${actionsHtml}</td>
     `;
     tbody.append(row);
   }
 }
 
+function createL1DeskCard(exec, showSignInBtn = false) {
+  const card = document.createElement("div");
+  card.style.background = exec.is_current ? "#eff6ff" : "#fff";
+  card.style.border = exec.is_current ? "2px solid #2563eb" : "1px solid #e2e8f0";
+  card.style.borderRadius = "8px";
+  card.style.padding = "14px";
+  card.style.display = "flex";
+  card.style.flexDirection = "column";
+  card.style.gap = "8px";
+
+  const icons = {
+    "UPI & Digital Payments": "📱",
+    "ATM & Cash Withdrawal": "🏧",
+    "Account & Balance": "💳",
+    "Account Access & KYC": "🪪",
+  };
+  const icon = icons[exec.category] || "🎧";
+  const badgeText = exec.is_current ? "Active You" : "Online";
+  const badgeBg = exec.is_current ? "#dbeafe" : "#dcfce7";
+  const badgeColor = exec.is_current ? "#1d4ed8" : "#15803d";
+
+  card.innerHTML = `
+    <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span style="font-size:22px;">${icon}</span>
+        <div>
+          <strong style="color:#0f172a; font-size:13px; display:block;">${escapeHtml(exec.username)}</strong>
+          <small style="color:#64748b; font-size:11px;">L1 Banking Support Desk</small>
+        </div>
+      </div>
+      <span class="ticket-badge-pill" style="background:${badgeBg}; color:${badgeColor}; font-weight:700;">${badgeText}</span>
+    </div>
+    <div style="font-size:11px; color:#334155; margin-top:2px;">
+      <span>Category Desk:</span> <b style="color:#0369a1;">${escapeHtml(exec.category)}</b>
+    </div>
+    <div style="font-size:11px; color:#475569; display:flex; justify-content:space-between; align-items:center; padding-top:6px; border-top:1px solid #f1f5f9; margin-top:4px;">
+      <span>Active Assigned Disputes:</span>
+      <strong style="color:#1e3a8a; font-size:13px;">${exec.active_tickets}</strong>
+    </div>
+    ${exec.is_current ? `
+      <div style="text-align:center; font-size:11px; color:#1d4ed8; font-weight:700; margin-top:6px; padding:6px; background:#dbeafe; border-radius:6px;">
+        ✓ Currently Signed-In Desk
+      </div>
+    ` : (showSignInBtn ? `
+      <div style="text-align:center; font-size:11px; color:#64748b; margin-top:6px; padding:6px; background:#f8fafc; border-radius:6px; border:1px solid #e2e8f0;">
+        Sign in with email to access
+      </div>
+    ` : "")}
+  `;
+  return card;
+}
+
+function createL2DeskCard(spec, showSignInBtn = false) {
+  const card = document.createElement("div");
+  card.style.background = spec.is_current ? "#faf5ff" : "#fff";
+  card.style.border = spec.is_current ? "2px solid #9333ea" : "1px solid #e9d5ff";
+  card.style.borderRadius = "8px";
+  card.style.padding = "14px";
+  card.style.display = "flex";
+  card.style.flexDirection = "column";
+  card.style.gap = "8px";
+
+  const badgeText = spec.is_current ? "Active You" : "Online";
+  const badgeBg = spec.is_current ? "#fae8ff" : "#dcfce7";
+  const badgeColor = spec.is_current ? "#7e22ce" : "#15803d";
+  const icon = spec.role_title === "Senior Support" ? "🎯" : "🌐";
+
+  card.innerHTML = `
+    <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span style="font-size:22px;">${icon}</span>
+        <div>
+          <strong style="color:#0f172a; font-size:13px; display:block;">${escapeHtml(spec.username)}</strong>
+          <small style="color:#64748b; font-size:11px;">L2 Escalation Desk</small>
+        </div>
+      </div>
+      <span class="ticket-badge-pill" style="background:${badgeBg}; color:${badgeColor}; font-weight:700;">${badgeText}</span>
+    </div>
+    <div style="font-size:11px; color:#334155; margin-top:2px;">
+      <span>HLD Role:</span> <b style="color:#6b21a8;">${escapeHtml(spec.role_title)}</b>
+    </div>
+    <div style="font-size:11px; color:#475569;">
+      <span>Specialization:</span> <b>${escapeHtml(spec.focus)}</b>
+    </div>
+    <div style="font-size:11px; color:#475569; display:flex; justify-content:space-between; align-items:center; padding-top:6px; border-top:1px solid #f1f5f9; margin-top:4px;">
+      <span>Active Escalated Disputes:</span>
+      <strong style="color:#6b21a8; font-size:13px;">${spec.active_tickets}</strong>
+    </div>
+    ${spec.is_current ? `
+      <div style="text-align:center; font-size:11px; color:#7e22ce; font-weight:700; margin-top:6px; padding:6px; background:#fae8ff; border-radius:6px;">
+        ✓ Currently Signed-In Desk
+      </div>
+    ` : (showSignInBtn ? `
+      <div style="text-align:center; font-size:11px; color:#64748b; margin-top:6px; padding:6px; background:#f8fafc; border-radius:6px; border:1px solid #e2e8f0;">
+        Sign in with email to access
+      </div>
+    ` : "")}
+  `;
+  return card;
+}
+
 async function loadSupportTeam() {
   const token = sessionStorage.getItem(tokenKey);
   if (!token) return;
-  const container = document.querySelector("#l1-team-grid");
-  if (!container) return;
+
+  const l1Section = document.querySelector("#l1-supporters-section");
+  const l2Section = document.querySelector("#l2-supporters-section");
+  const archSection = document.querySelector("#support-architecture-hierarchy");
+  const l1Container = document.querySelector("#l1-team-grid");
+  const l2Container = document.querySelector("#l2-team-grid");
+  if (!l1Container) return;
 
   try {
     const res = await fetch("/support/team", {
       headers: { Authorization: `Bearer ${token}` },
     });
     const data = await readResponse(res);
-    container.replaceChildren();
+    const userRole = currentExecutive?.role || "";
+    const isAdmin = userRole === "Admin";
 
-    const icons = {
-      "UPI & Digital Payments": "📱",
-      "ATM & Cash Withdrawal": "🏧",
-      "Account & Balance": "💳",
-      "Account Access & KYC": "🪪",
-    };
-
-    for (const exec of data.l1_executives || []) {
-      const card = document.createElement("div");
-      card.style.background = exec.is_current ? "#eff6ff" : "#fff";
-      card.style.border = exec.is_current ? "2px solid #2563eb" : "1px solid #e2e8f0";
-      card.style.borderRadius = "8px";
-      card.style.padding = "14px";
-      card.style.display = "flex";
-      card.style.flexDirection = "column";
-      card.style.gap = "8px";
-
-      const icon = icons[exec.category] || "🎧";
-      const badgeText = exec.is_current ? "Active You" : "Online";
-      const badgeBg = exec.is_current ? "#dbeafe" : "#dcfce7";
-      const badgeColor = exec.is_current ? "#1d4ed8" : "#15803d";
-
-      card.innerHTML = `
-        <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-          <div style="display:flex; align-items:center; gap:8px;">
-            <span style="font-size:22px;">${icon}</span>
-            <div>
-              <strong style="color:#0f172a; font-size:13px; display:block;">${escapeHtml(exec.username)}</strong>
-              <small style="color:#64748b; font-size:11px;">L1 Banking Support Desk</small>
-            </div>
-          </div>
-          <span class="ticket-badge-pill" style="background:${badgeBg}; color:${badgeColor}; font-weight:700;">${badgeText}</span>
-        </div>
-        <div style="font-size:11px; color:#334155; margin-top:2px;">
-          <span>Category Desk:</span> <b style="color:#0369a1;">${escapeHtml(exec.category)}</b>
-        </div>
-        <div style="font-size:11px; color:#475569; display:flex; justify-content:space-between; align-items:center; padding-top:6px; border-top:1px solid #f1f5f9; margin-top:4px;">
-          <span>Active Assigned Disputes:</span>
-          <strong style="color:#1e3a8a; font-size:13px;">${exec.active_tickets}</strong>
-        </div>
-        ${exec.is_current ? `
-          <div style="text-align:center; font-size:11px; color:#1d4ed8; font-weight:700; margin-top:6px; padding:6px; background:#dbeafe; border-radius:6px;">
-            ✓ Currently Signed-In Desk
-          </div>
-        ` : `
-          <div style="text-align:center; font-size:11px; color:#64748b; margin-top:6px; padding:6px; background:#f8fafc; border-radius:6px; border:1px solid #e2e8f0;">
-            Sign in with email to access
-          </div>
-        `}
-      `;
-      container.append(card);
+    // Regular supporter/senior should NOT see the static architecture hierarchy of all names
+    if (archSection) {
+      archSection.style.display = isAdmin ? "block" : "none";
     }
 
-    // Populate L2 Senior Support / Specialists Grid (HLD: 2 Persons)
-    const l2Container = document.querySelector("#l2-team-grid");
-    if (l2Container) {
-      l2Container.replaceChildren();
-      for (const spec of data.l2_specialists || []) {
-        const card = document.createElement("div");
-        card.style.background = spec.is_current ? "#faf5ff" : "#fff";
-        card.style.border = spec.is_current ? "2px solid #9333ea" : "1px solid #e9d5ff";
-        card.style.borderRadius = "8px";
-        card.style.padding = "14px";
-        card.style.display = "flex";
-        card.style.flexDirection = "column";
-        card.style.gap = "8px";
+    // 1. If logged in as L1 Support:
+    // Only show the logged-in L1 executive's own desk card. Hide L2 seniors section and other supporters!
+    if (userRole === "L1 Support") {
+      if (l2Section) l2Section.style.display = "none";
+      if (l1Section) l1Section.style.display = "";
 
-        const badgeText = spec.is_current ? "Active You" : "Online";
-        const badgeBg = spec.is_current ? "#fae8ff" : "#dcfce7";
-        const badgeColor = spec.is_current ? "#7e22ce" : "#15803d";
-        const icon = spec.role_title === "Senior Support" ? "🎯" : "🌐";
+      const myExec = (data.l1_executives || []).find((exec) => exec.is_current);
+      l1Container.replaceChildren();
 
-        card.innerHTML = `
-          <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-            <div style="display:flex; align-items:center; gap:8px;">
-              <span style="font-size:22px;">${icon}</span>
-              <div>
-                <strong style="color:#0f172a; font-size:13px; display:block;">${escapeHtml(spec.username)}</strong>
-                <small style="color:#64748b; font-size:11px;">L2 Escalation Desk</small>
-              </div>
-            </div>
-            <span class="ticket-badge-pill" style="background:${badgeBg}; color:${badgeColor}; font-weight:700;">${badgeText}</span>
-          </div>
-          <div style="font-size:11px; color:#334155; margin-top:2px;">
-            <span>HLD Role:</span> <b style="color:#6b21a8;">${escapeHtml(spec.role_title)}</b>
-          </div>
-          <div style="font-size:11px; color:#475569;">
-            <span>Specialization:</span> <b>${escapeHtml(spec.focus)}</b>
-          </div>
-          <div style="font-size:11px; color:#475569; display:flex; justify-content:space-between; align-items:center; padding-top:6px; border-top:1px solid #f1f5f9; margin-top:4px;">
-            <span>Active Escalated Disputes:</span>
-            <strong style="color:#6b21a8; font-size:13px;">${spec.active_tickets}</strong>
-          </div>
-          ${spec.is_current ? `
-            <div style="text-align:center; font-size:11px; color:#7e22ce; font-weight:700; margin-top:6px; padding:6px; background:#fae8ff; border-radius:6px;">
-              ✓ Currently Signed-In Desk
-            </div>
-          ` : `
-            <div style="text-align:center; font-size:11px; color:#64748b; margin-top:6px; padding:6px; background:#f8fafc; border-radius:6px; border:1px solid #e2e8f0;">
-              Sign in with email to access
-            </div>
-          `}
-        `;
-        l2Container.append(card);
+      if (myExec) {
+        const eyebrowEl = document.querySelector("#l1-section-eyebrow");
+        const titleEl = document.querySelector("#l1-section-title");
+        const badgeEl = document.querySelector("#l1-section-badge");
+        if (eyebrowEl) eyebrowEl.innerHTML = '<span class="eyebrow-line" style="background:#0369a1;"></span> ACTIVE SUPPORT DESK';
+        if (titleEl) titleEl.textContent = `Assigned Desk: ${myExec.username}`;
+        if (badgeEl) badgeEl.textContent = "ACTIVE ON DUTY";
+
+        l1Container.append(createL1DeskCard(myExec, false));
+      }
+      return;
+    }
+
+    // 2. If logged in as L2 Senior Support:
+    // Only show the logged-in L2 specialist's own desk card. Hide L1 supporters section and other seniors!
+    if (userRole === "L2 Senior Support") {
+      if (l1Section) l1Section.style.display = "none";
+      if (l2Section) l2Section.style.display = "";
+
+      const mySpec = (data.l2_specialists || []).find((spec) => spec.is_current);
+      if (l2Container) {
+        l2Container.replaceChildren();
+        if (mySpec) {
+          const eyebrowEl = document.querySelector("#l2-section-eyebrow");
+          const titleEl = document.querySelector("#l2-section-title");
+          const badgeEl = document.querySelector("#l2-section-badge");
+          if (eyebrowEl) eyebrowEl.innerHTML = '<span class="eyebrow-line" style="background:#7e22ce;"></span> ACTIVE SENIOR ESCALATION DESK';
+          if (titleEl) titleEl.textContent = `Senior Escalation Desk: ${mySpec.username}`;
+          if (badgeEl) badgeEl.textContent = "ACTIVE ON DUTY";
+
+          l2Container.append(createL2DeskCard(mySpec, false));
+        }
+      }
+      return;
+    }
+
+    // 3. If logged in as L3 Support Manager:
+    // Hide both L1 and L2 desk roster grids
+    if (userRole === "L3 Support Manager") {
+      if (l1Section) l1Section.style.display = "none";
+      if (l2Section) l2Section.style.display = "none";
+      return;
+    }
+
+    // 4. If Admin: Show full team rosters for administrative oversight
+    if (isAdmin) {
+      if (l1Section) l1Section.style.display = "";
+      if (l2Section) l2Section.style.display = "";
+
+      l1Container.replaceChildren();
+      for (const exec of data.l1_executives || []) {
+        l1Container.append(createL1DeskCard(exec, true));
+      }
+      if (l2Container) {
+        l2Container.replaceChildren();
+        for (const spec of data.l2_specialists || []) {
+          l2Container.append(createL2DeskCard(spec, true));
+        }
       }
     }
   } catch (err) {
-    container.innerHTML = `<div style="color:#94a3b8; font-size:12px;">Notice: Could not refresh team roster: ${escapeHtml(err.message)}</div>`;
+    if (l1Container) {
+      l1Container.innerHTML = `<div style="color:#94a3b8; font-size:12px;">Notice: Could not load desk details: ${escapeHtml(err.message)}</div>`;
+    }
   }
 }
 
 
 function openInvestigationModal(ticketId) {
-  const t = allQueueTickets.find((item) => String(item.id) === String(ticketId));
+  const t = allQueueTickets.find((item) => String(item.id) === String(ticketId))
+         || allEscalatedTickets.find((item) => String(item.id) === String(ticketId));
   if (!t) return;
 
   document.querySelector("#modal-ticket-id").value = t.id;
@@ -386,9 +589,25 @@ function openInvestigationModal(ticketId) {
 
   document.querySelector("#modal-customer-name").textContent = t.customer_name || "Customer";
   document.querySelector("#modal-customer-email").textContent = t.customer_email || "customer@bankassist.ai";
+  const caseTypeEl = document.querySelector("#modal-case-type");
+  if (caseTypeEl) caseTypeEl.textContent = t.case_type || "Complaint";
   document.querySelector("#modal-category").textContent = t.category;
-  const slaFormatted = t.sla_deadline ? new Date(t.sla_deadline).toLocaleString() : `${t.sla_hours} hrs`;
-  document.querySelector("#modal-sla").textContent = slaFormatted;
+  const slaInfo = formatSlaInfo(t.sla_hours, t.sla_deadline, t.status);
+  const createdDate = t.created_at ? new Date(t.created_at).toLocaleString() : "Recently";
+
+  const createdEl = document.querySelector("#modal-created");
+  if (createdEl) createdEl.textContent = createdDate;
+
+  const slaWindowEl = document.querySelector("#modal-sla-window");
+  if (slaWindowEl) slaWindowEl.textContent = `${slaInfo.hours} Hours (${t.assigned_tier} SLA)`;
+
+  const deadlineEl = document.querySelector("#modal-sla-deadline");
+  if (deadlineEl) deadlineEl.textContent = `📅 ${slaInfo.deadlineText}`;
+
+  const slaStatusEl = document.querySelector("#modal-sla-status");
+  if (slaStatusEl) {
+    slaStatusEl.innerHTML = `<span class="ticket-badge-pill" style="background:${slaInfo.bg}; color:${slaInfo.color}; font-weight:700;">${slaInfo.badgeText}</span>`;
+  }
   document.querySelector("#modal-tier").textContent = `${t.assigned_tier} (${t.assigned_to_name || "Queue"})`;
 
   const evidenceEl = document.querySelector("#modal-evidence-link");
@@ -419,7 +638,7 @@ function openInvestigationModal(ticketId) {
 
   // Pre-fill notes if existing
   document.querySelector("#modal-notes-input").value = t.resolution_notes || "";
-  if (["In Progress", "Resolved", "Closed"].includes(t.status)) {
+  if (["In Progress", "Awaiting Customer Response", "Resolved", "Closed"].includes(t.status)) {
     document.querySelector("#modal-status-select").value = t.status;
   }
 
@@ -462,7 +681,7 @@ async function handleSupportAction(action, ticketId) {
         }),
       });
       await readResponse(response);
-      await loadSupportQueue();
+      await Promise.allSettled([loadSupportQueue(), loadSupportTeam()]);
     } catch (err) {
       alert("Error resolving ticket: " + err.message);
     }
@@ -483,7 +702,7 @@ async function handleSupportAction(action, ticketId) {
         }),
       });
       await readResponse(response);
-      await loadSupportQueue();
+      await Promise.allSettled([loadSupportQueue(), loadSupportTeam()]);
     } catch (err) {
       alert("Error escalating ticket: " + err.message);
     }
@@ -522,6 +741,7 @@ logoutButton?.addEventListener("click", (e) => {
 
 document.querySelector("#refresh-support-queue")?.addEventListener("click", loadSupportQueue);
 document.querySelector("#refresh-escalations-queue")?.addEventListener("click", loadSupportQueue);
+document.querySelector("#escalation-scope-filter")?.addEventListener("change", loadSupportQueue);
 document.querySelector("#category-filter")?.addEventListener("change", renderQueueTable);
 
 document.addEventListener("click", (e) => {
@@ -551,8 +771,10 @@ document.querySelector("#investigation-action-form")?.addEventListener("submit",
   const status = document.querySelector("#modal-status-select").value;
   const notes = document.querySelector("#modal-notes-input").value;
   const saveBtn = document.querySelector("#modal-save-btn");
-  saveBtn.disabled = true;
-  saveBtn.textContent = "Saving…";
+  if (saveBtn) {
+    saveBtn.disabled = true;
+    saveBtn.textContent = "Sending reply…";
+  }
 
   try {
     const res = await fetch(`/tickets/support/${ticketId}/update`, {
@@ -569,12 +791,14 @@ document.querySelector("#investigation-action-form")?.addEventListener("submit",
     });
     await readResponse(res);
     closeInvestigationModal();
-    await loadSupportQueue();
+    await Promise.allSettled([loadSupportQueue(), loadSupportTeam()]);
   } catch (err) {
     alert("Update failed: " + err.message);
   } finally {
-    saveBtn.disabled = false;
-    saveBtn.textContent = "Save Status Update";
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.innerHTML = "💬 Send Reply & Update Status";
+    }
   }
 });
 

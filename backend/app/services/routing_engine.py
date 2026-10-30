@@ -130,6 +130,7 @@ def create_and_route_ticket(
     category: str,
     priority: str = "Normal",
     ai_summary: Optional[str] = None,
+    case_type: str = "Complaint",
 ) -> Ticket:
     """
     Creates a new support ticket and automatically routes it to an L1 executive
@@ -161,6 +162,7 @@ def create_and_route_ticket(
         title=title,
         description=description,
         category=category,
+        case_type=case_type,
         priority=final_priority,
         status="Assigned" if assignee else "Open",
         assigned_tier=assigned_tier,
@@ -175,11 +177,12 @@ def create_and_route_ticket(
 
     # Log creation and routing in TicketHistory
     assigned_name = assignee.username if assignee else "Unassigned Queue"
+    deadline_formatted = sla_deadline.strftime("%d %b %Y, %I:%M %p UTC")
     history_entry = TicketHistory(
         ticket_id=ticket.id,
         actor_id=customer.id,
         action="CREATED_AND_ROUTED",
-        details=f"Ticket created automatically by AI Agent for category '{category}' and routed to {assigned_tier} ({assigned_name}). Priority: {final_priority}. SLA: {sla_hours}h.",
+        details=f"Ticket created automatically by AI Agent for category '{category}' and routed to {assigned_tier} ({assigned_name}). Priority: {final_priority}. SLA Window: {sla_hours}h. Target Resolution Deadline: {deadline_formatted}.",
     )
     db.add(history_entry)
     db.commit()
@@ -222,11 +225,12 @@ def escalate_ticket(
     ticket.sla_deadline = new_sla_deadline
 
     assigned_str = new_assignee.username if new_assignee else "Unassigned Queue"
+    deadline_formatted = new_sla_deadline.strftime("%d %b %Y, %I:%M %p UTC")
     history_entry = TicketHistory(
         ticket_id=ticket.id,
         actor_id=actor.id,
         action="ESCALATED",
-        details=f"Ticket escalated from {current_tier} to {next_tier} ({assigned_str}) by {actor.username}. Reason: {reason}",
+        details=f"Ticket escalated from {current_tier} to {next_tier} ({assigned_str}) by {actor.username}. Reason: {reason}. Escalation SLA: {new_sla_hours}h. New Resolution Deadline: {deadline_formatted}.",
     )
     db.add(history_entry)
     db.commit()

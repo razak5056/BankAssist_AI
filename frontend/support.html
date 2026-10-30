@@ -81,7 +81,7 @@
           </div>
 
           <!-- Section 1: Support Team Mapping Card (Direct HLD Requirement) -->
-          <section class="admin-panel" style="margin-bottom: 24px; background: linear-gradient(to right, #f8fafc, #eff6ff); border: 1px solid #bfdbfe;">
+          <section class="admin-panel" id="support-architecture-hierarchy" style="display:none; margin-bottom: 24px; background: linear-gradient(to right, #f8fafc, #eff6ff); border: 1px solid #bfdbfe;">
             <div class="accounts-list-heading">
               <div>
                 <div class="eyebrow" style="color:#2563eb;"><span class="eyebrow-line" style="background:#2563eb;"></span> HLD ARCHITECTURE: SUPPORT TEAM MAPPING</div>
@@ -131,12 +131,12 @@
           <section class="admin-panel" id="l1-supporters-section" style="margin-bottom: 24px; border: 1px solid #cbd5e1;">
             <div class="accounts-list-heading">
               <div>
-                <div class="eyebrow" style="color:#0369a1;"><span class="eyebrow-line" style="background:#0369a1;"></span> HLD SPECIFICATION: 4 L1 SUPPORT EXECUTIVES</div>
-                <h3 style="margin: 4px 0 0; color: #0f172a;">L1 Banking Support Executives Team</h3>
+                <div class="eyebrow" id="l1-section-eyebrow" style="color:#0369a1;"><span class="eyebrow-line" style="background:#0369a1;"></span> ACTIVE SUPPORT DESK</div>
+                <h3 id="l1-section-title" style="margin: 4px 0 0; color: #0f172a;">Your Assigned Support Desk</h3>
               </div>
-              <span class="ticket-badge-pill" style="background:#e0f2fe; color:#0369a1; font-weight:700;">4 EXECUTIVES ON DUTY</span>
+              <span id="l1-section-badge" class="ticket-badge-pill" style="background:#e0f2fe; color:#0369a1; font-weight:700;">ACTIVE ON DUTY</span>
             </div>
-            <div id="l1-team-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; margin-top: 14px;">
+            <div id="l1-team-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 360px)); gap: 14px; margin-top: 14px;">
               <!-- Populated dynamically via JS -->
             </div>
           </section>
@@ -145,12 +145,12 @@
           <section class="admin-panel" id="l2-supporters-section" style="margin-bottom: 24px; border: 1px solid #e9d5ff; background: linear-gradient(to right, #faf5ff, #fff);">
             <div class="accounts-list-heading">
               <div>
-                <div class="eyebrow" style="color:#7e22ce;"><span class="eyebrow-line" style="background:#7e22ce;"></span> HLD SPECIFICATION: L2 SENIOR SUPPORT & SPECIALISTS (2 PERSONS)</div>
-                <h3 style="margin: 4px 0 0; color: #581c87;">L2 Senior Support & Cross-Category Specialists</h3>
+                <div class="eyebrow" id="l2-section-eyebrow" style="color:#7e22ce;"><span class="eyebrow-line" style="background:#7e22ce;"></span> ACTIVE SENIOR ESCALATION DESK</div>
+                <h3 id="l2-section-title" style="margin: 4px 0 0; color: #581c87;">Your Senior Escalation Desk</h3>
               </div>
-              <span class="ticket-badge-pill" style="background:#fae8ff; color:#7e22ce; font-weight:700;">2 SENIOR SPECIALISTS ON DUTY</span>
+              <span id="l2-section-badge" class="ticket-badge-pill" style="background:#fae8ff; color:#7e22ce; font-weight:700;">ACTIVE ON DUTY</span>
             </div>
-            <div id="l2-team-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; margin-top: 14px;">
+            <div id="l2-team-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 360px)); gap: 14px; margin-top: 14px;">
               <!-- Populated dynamically via JS -->
             </div>
           </section>
@@ -210,7 +210,7 @@
                     <th>CATEGORY</th>
                     <th>PRIORITY</th>
                     <th>STATUS</th>
-                    <th>SLA TARGET</th>
+                    <th>SLA & DEADLINE</th>
                     <th>EVIDENCE</th>
                     <th>ACTIONS</th>
                   </tr>
@@ -232,7 +232,13 @@
                   <span id="escalation-active-desk-name" style="color:#9333ea; font-weight:700;">Active Desk</span>
                 </h2>
               </div>
-              <button class="inline-action" id="refresh-escalations-queue" type="button">Refresh Escalations <span aria-hidden="true">↻</span></button>
+              <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                <select id="escalation-scope-filter" style="font-size:12px; padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; background:#fff;">
+                  <option value="desk">Desk & Category Escalations</option>
+                  <option value="all">All Bank Escalations</option>
+                </select>
+                <button class="inline-action" id="refresh-escalations-queue" type="button">Refresh Escalations <span aria-hidden="true">↻</span></button>
+              </div>
             </div>
             <div class="table-scroll">
               <table class="accounts-table">
@@ -244,11 +250,12 @@
                     <th>PRIORITY</th>
                     <th>ESCALATION STATUS</th>
                     <th>ASSIGNED DESK</th>
+                    <th>SLA & DEADLINE</th>
                     <th>ACTIONS</th>
                   </tr>
                 </thead>
                 <tbody id="support-escalations-table-body">
-                  <tr><td colspan="7" class="empty-table">No escalated tickets found.</td></tr>
+                  <tr><td colspan="8" class="empty-table">No escalated tickets found.</td></tr>
                 </tbody>
               </table>
             </div>
@@ -282,9 +289,13 @@
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;background:#f8fafc;padding:14px;border-radius:8px;margin-bottom:16px;font-size:0.875rem;border:1px solid #e2e8f0;">
         <div><strong style="color:#475569;">Customer:</strong> <span id="modal-customer-name">—</span></div>
         <div><strong style="color:#475569;">Email:</strong> <span id="modal-customer-email">—</span></div>
+        <div><strong style="color:#475569;">Case Type:</strong> <span id="modal-case-type" style="color:#991b1b;font-weight:700;">—</span></div>
         <div><strong style="color:#475569;">Category:</strong> <span id="modal-category">—</span></div>
-        <div><strong style="color:#475569;">SLA Target:</strong> <span id="modal-sla">—</span></div>
-        <div><strong style="color:#475569;">Assigned Tier:</strong> <span id="modal-tier">—</span></div>
+        <div><strong style="color:#475569;">Dispute Created:</strong> <span id="modal-created">—</span></div>
+        <div><strong style="color:#475569;">Assigned Desk:</strong> <span id="modal-tier">—</span></div>
+        <div><strong style="color:#475569;">SLA Window:</strong> <span id="modal-sla-window" style="color:#2563eb;font-weight:600;">—</span></div>
+        <div><strong style="color:#475569;">Resolution Deadline:</strong> <span id="modal-sla-deadline" style="color:#0f172a;font-weight:700;">—</span></div>
+        <div><strong style="color:#475569;">SLA Live Status:</strong> <span id="modal-sla-status">—</span></div>
         <div><strong style="color:#475569;">Unverified Evidence:</strong> <span id="modal-evidence-link">—</span></div>
       </div>
 
@@ -306,9 +317,11 @@
         <div id="modal-history-list" style="max-height:140px;overflow-y:auto;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;font-size:0.8rem;color:#475569;"></div>
       </div>
 
-      <!-- Update Ticket Status (HLD: Update ticket status) -->
+      <!-- Update Ticket Status & Reply to Customer (HLD: Investigate and respond / Update ticket status) -->
       <div style="border-top:1px solid #e2e8f0;padding-top:16px;">
-        <h4 style="margin:0 0 8px;font-size:0.85rem;text-transform:uppercase;letter-spacing:0.05em;color:#15803d;">Investigation & Status Update</h4>
+        <h4 style="margin:0 0 8px;font-size:0.85rem;text-transform:uppercase;letter-spacing:0.05em;color:#15803d;display:flex;align-items:center;gap:6px;">
+          <span>💬</span> Investigation Response & Status Update
+        </h4>
         <form id="investigation-action-form" style="display:flex;flex-direction:column;gap:12px;">
           <input type="hidden" id="modal-ticket-id" />
           <div style="display:grid;grid-template-columns:1fr 2fr;gap:12px;">
@@ -316,18 +329,19 @@
               <label style="font-size:0.8rem;font-weight:600;color:#475569;display:block;margin-bottom:4px;">Update Status</label>
               <select id="modal-status-select" style="width:100%;padding:8px;border:1px solid #cbd5e1;border-radius:6px;font-size:0.875rem;">
                 <option value="In Progress">In Progress</option>
+                <option value="Awaiting Customer Response">Awaiting Customer Response (Request Details)</option>
                 <option value="Resolved">Resolved</option>
                 <option value="Closed">Closed</option>
               </select>
             </div>
             <div>
-              <label style="font-size:0.8rem;font-weight:600;color:#475569;display:block;margin-bottom:4px;">Investigation / Resolution Notes</label>
-              <input type="text" id="modal-notes-input" placeholder="e.g. Verified with NPCI reversal logs; credit initiated." style="width:100%;padding:8px;border:1px solid #cbd5e1;border-radius:6px;font-size:0.875rem;" />
+              <label style="font-size:0.8rem;font-weight:600;color:#1e293b;display:block;margin-bottom:4px;">Official Reply to Customer / Resolution Notes</label>
+              <textarea id="modal-notes-input" rows="2" placeholder="Type your official reply or resolution message to the customer (e.g. Verified with NPCI reversal logs. Refund of ₹1,500 has been credited to your account)." style="width:100%;padding:8px;border:1px solid #cbd5e1;border-radius:6px;font-size:0.875rem;resize:vertical;font-family:inherit;"></textarea>
             </div>
           </div>
           <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:6px;">
             <button type="button" id="modal-escalate-btn" class="action-btn-sm action-btn-escalate" style="padding:8px 16px;">Escalate to Senior Tier ↗</button>
-            <button type="submit" id="modal-save-btn" class="action-btn-sm action-btn-resolve" style="padding:8px 16px;">Save Status Update</button>
+            <button type="submit" id="modal-save-btn" class="action-btn-sm action-btn-resolve" style="padding:8px 18px;font-weight:700;">💬 Send Reply & Update Status</button>
           </div>
         </form>
       </div>

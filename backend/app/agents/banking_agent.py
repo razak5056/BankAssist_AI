@@ -14,8 +14,14 @@ from urllib.request import Request, urlopen
 
 from sqlalchemy.orm import Session
 
+from backend.app.models.ticket import Ticket
 from backend.app.models.user import User
-from backend.app.services.intent_classifier import classify_intent
+from backend.app.services.intent_classifier import (
+    classify_intent,
+    is_unresolved_solution_followup,
+    is_clarification_or_didnt_get_followup,
+    is_direct_escalation_request,
+)
 from backend.app.services.knowledge_base import (
     detect_category,
     is_dispute_or_complaint,
@@ -46,12 +52,21 @@ def _call_ai_provider(
     if is_ticket_response and ticket_info:
         system_instruction = (
             "You are the BankAssist AI Banking Agent. The customer has reported a banking dispute/problem. "
-            f"An automatic ticket has already been created with details: Ticket #{ticket_info['ticket_number']}, "
-            f"Category: {ticket_info['category']}, Priority: {ticket_info['priority']}, Assigned Tier: {ticket_info['assigned_tier']}, "
-            f"SLA Target: {ticket_info['sla_hours']} hours.\n\n"
-            "Respond politely and empathetically. Summarize the immediate banking turnaround guidelines (e.g. RBI/NPCI rules from context), "
-            "provide any immediate safety precautions (such as blocking card if unauthorized), and confirm the ticket reference number. "
-            "Never ask for PINs, passwords, or OTPs. Keep the response concise, professional, and structured."
+            f"An automatic ticket has already been registered in the banking system with clear SLA:\n"
+            f"• Ticket Number: #{ticket_info['ticket_number']}\n"
+            f"• Category: {ticket_info['category']}\n"
+            f"• Case Type: {ticket_info.get('case_type', 'Complaint')}\n"
+            f"• Priority: {ticket_info['priority']}\n"
+            f"• Assigned Tier: {ticket_info['assigned_tier']}\n"
+            f"• Assigned Desk: {ticket_info.get('assigned_to_name', 'Support Queue')}\n"
+            f"• SLA Turnaround Window: {ticket_info['sla_hours']} Hours (Standard Banking TAT)\n"
+            f"• Target Resolution Deadline: {ticket_info.get('sla_deadline')}\n\n"
+            "Your response MUST explicitly confirm the registered ticket details and clearly inform the customer of:\n"
+            "1. The Ticket Reference Number\n"
+            "2. The SLA Resolution Window (e.g. 24 hours for L1)\n"
+            "3. The Exact Target Resolution Deadline\n"
+            "4. Immediate procedural turnaround instructions and regulatory safety rules (e.g. RBI zero liability / instant card blocking if unauthorized charges)\n"
+            "Be empathetic, reassuring, professional, and clear. Never ask for PINs, passwords, or OTPs."
         )
     else:
         system_instruction = (
@@ -92,17 +107,40 @@ def _call_ai_provider(
 
 def format_ticket_dict(ticket) -> dict[str, Any]:
     """Formats a SQLAlchemy Ticket object into a dictionary for response serialization."""
+    sla_remaining_hours = None
+    sla_status = "On Track"
+    if ticket.sla_deadline:
+        now_utc = datetime.now(timezone.utc)
+        deadline = ticket.sla_deadline
+        if deadline.tzinfo is None:
+            deadline = deadline.replace(tzinfo=timezone.utc)
+        diff_seconds = (deadline - now_utc).total_seconds()
+        sla_remaining_hours = round(diff_seconds / 3600.0, 1)
+        if ticket.status in ("Resolved", "Closed"):
+            sla_status = "Completed"
+        elif diff_seconds < 0:
+            sla_status = "Breached"
+        elif diff_seconds <= 4 * 3600:
+            sla_status = "Critical"
+        elif diff_seconds <= 12 * 3600:
+            sla_status = "Approaching"
+        else:
+            sla_status = "On Track"
+
     return {
         "id": ticket.id,
         "ticket_number": ticket.ticket_number,
         "title": ticket.title,
         "description": ticket.description,
         "category": ticket.category,
+        "case_type": getattr(ticket, "case_type", "Complaint") or "Complaint",
         "priority": ticket.priority,
         "status": ticket.status,
         "assigned_tier": ticket.assigned_tier,
         "sla_hours": ticket.sla_hours,
         "sla_deadline": ticket.sla_deadline.isoformat() if ticket.sla_deadline else None,
+        "sla_remaining_hours": sla_remaining_hours,
+        "sla_status": sla_status,
         "ai_summary": ticket.ai_summary,
         "resolution_notes": ticket.resolution_notes,
         "evidence_filename": getattr(ticket, "evidence_filename", None),
@@ -128,32 +166,495 @@ def format_ticket_dict(ticket) -> dict[str, Any]:
 
 
 INTENT_TOPIC_MAP = {
-    "ACCOUNT_PROFILE_INQUIRY": "account_profile_info",
+    "ACCOUNT_PROFILE_INQUIRY": "account_balance_statement",
     "UPI_TRANSACTION_LIMIT": "upi_limits",
     "ATM_WITHDRAWAL_LIMIT": "atm_limits",
     "CARD_USAGE_LIMIT": "card_online_usage",
+    "CARD_MANAGEMENT_INQUIRY": "card_online_usage",
+    "CARD_BLOCK_GUIDANCE": "card_lost_stolen_block",
     "PIN_RESET_GUIDANCE": "upi_pin_reset",
     "BALANCE_STATEMENT_INQUIRY": "account_balance_statement",
-    "CARD_MANAGEMENT_INQUIRY": "card_online_usage",
-    "KYC_PROCESS_INQUIRY": "kyc_verification_update",
+    "KYC_PROCESS_INQUIRY": "kyc_periodic_update",
+    "KYC_DOCUMENTS_INQUIRY": "kyc_valid_documents",
+    "DORMANT_ACCOUNT_INQUIRY": "account_dormant_reactivation",
     "TRANSFER_MODES_INQUIRY": "account_transfer_modes",
+    "ATM_CARD_SWALLOWED": "atm_card_swallowed",
+    "ATM_CASH_DISPENSE_FAILURE": "atm_cash_not_dispensed",
+    "UPI_TRANSACTION_FAILURE": "upi_failed_debited",
+    "UNAUTHORIZED_FRAUD_DISPUTE": "card_unauthorized_fraud",
 }
+
+
+CUSTOMER_LAST_CONTEXT: dict[int, dict[str, Any]] = {}
+
+
+def get_previous_turn_context(
+    customer_id: int,
+    history: Optional[list[dict[str, Any]]] = None,
+    current_query: Optional[str] = None,
+) -> Optional[dict[str, Any]]:
+    """
+    Extracts the previous user turn, category, and knowledge topic
+    from explicit history array or server-side customer session cache.
+    Recovers the substantive question and topic even across multiple follow-ups.
+    """
+    if history and len(history) > 0:
+        prev_user_q = None
+        prev_assistant_meta = {}
+        substantive_q = None
+        substantive_topic = None
+        substantive_cat = None
+
+        for msg in reversed(history):
+            role = msg.get("role")
+            content = msg.get("content", "").strip()
+            if role == "user":
+                if current_query and content.lower() == current_query.lower() and not prev_assistant_meta:
+                    continue
+                if not prev_user_q:
+                    prev_user_q = content
+                is_meta_followup = (
+                    is_direct_escalation_request(content)
+                    or is_clarification_or_didnt_get_followup(content)
+                    or is_unresolved_solution_followup(content)
+                )
+                if not is_meta_followup and not substantive_q:
+                    substantive_q = content
+            elif role == "assistant":
+                if not prev_assistant_meta:
+                    prev_assistant_meta = msg
+                src = msg.get("source", "")
+                cat = msg.get("category", "")
+                if cat and cat != "General" and not substantive_cat:
+                    substantive_cat = cat
+                if src and not src.startswith("Guidance Clarification") and src != "Clarification" and not substantive_topic:
+                    substantive_topic = src
+
+        chosen_q = substantive_q or prev_user_q
+        chosen_cat = substantive_cat or prev_assistant_meta.get("category")
+        if not chosen_cat or chosen_cat in ("General", "Account", None):
+            detected = detect_category(chosen_q or "")
+            if detected and detected != "General":
+                chosen_cat = detected
+            elif "card" in (chosen_q or "").lower():
+                chosen_cat = "Cards"
+            elif "upi" in (chosen_q or "").lower():
+                chosen_cat = "UPI"
+            elif "atm" in (chosen_q or "").lower():
+                chosen_cat = "ATM"
+            elif "kyc" in (chosen_q or "").lower():
+                chosen_cat = "KYC"
+
+        chosen_topic = substantive_topic or prev_assistant_meta.get("source") or prev_assistant_meta.get("intent") or "General Inquiry"
+
+        if chosen_q:
+            return {
+                "query": chosen_q,
+                "category": chosen_cat or "General",
+                "topic": chosen_topic,
+                "case_type": prev_assistant_meta.get("case_type") or "Inquiry",
+            }
+
+    if customer_id and customer_id in CUSTOMER_LAST_CONTEXT:
+        cached = CUSTOMER_LAST_CONTEXT[customer_id]
+        diff = (datetime.now(timezone.utc) - cached.get("timestamp", datetime.now(timezone.utc))).total_seconds()
+        if diff < 1800:
+            return cached
+
+    return None
+
+
+def _cache_customer_turn(customer_id: int, query: str, response: dict[str, Any]):
+    if not customer_id:
+        return
+    CUSTOMER_LAST_CONTEXT[customer_id] = {
+        "query": query,
+        "category": response.get("category", "General"),
+        "topic": response.get("source") or response.get("intent", ""),
+        "source": response.get("source", ""),
+        "intent": response.get("intent", ""),
+        "case_type": response.get("case_type", "Inquiry"),
+        "ticket_created": response.get("ticket_created", False),
+        "timestamp": datetime.now(timezone.utc),
+    }
 
 
 def process_customer_query(
     db: Session,
     customer: User,
     question: str,
+    history: Optional[list[dict[str, Any]]] = None,
 ) -> dict[str, Any]:
     """
     Core AI Agent entrypoint for customer queries.
     1. Understands customer query and detects category & intent.
-    2. Uses banking knowledge base.
-    3. If query is ambiguous (e.g. daily limits without payment type), asks for clarification.
-    4. Decides whether to answer directly or automatically create a support ticket.
-    5. Summarizes and responds.
+    2. Maintains multi-turn context (e.g. handling "this solution not working").
+    3. Uses banking knowledge base.
+    4. If query is ambiguous (e.g. daily limits without payment type), asks for clarification.
+    5. Decides whether to answer directly or automatically create a support ticket.
+    6. Summarizes and responds.
     """
     cleaned_query = question.strip()
+
+    def finalize(result: dict[str, Any]) -> dict[str, Any]:
+        _cache_customer_turn(customer.id if customer else 0, cleaned_query, result)
+        return result
+
+    # -------------------------------------------------------------
+    # CASE: Explicit Escalation to Human Support / Open Ticket
+    # e.g., "esclicate to support", "escalate to support", "talk to agent"
+    # -------------------------------------------------------------
+    if is_direct_escalation_request(cleaned_query):
+        prev_ctx = get_previous_turn_context(customer.id if customer else 0, history, current_query=cleaned_query)
+        if prev_ctx and prev_ctx.get("query"):
+            inherited_category = prev_ctx.get("category") or "General"
+            if inherited_category in ("General", "Account", None):
+                detected = detect_category(prev_ctx["query"])
+                if detected and detected != "General":
+                    inherited_category = detected
+                elif "card" in prev_ctx["query"].lower():
+                    inherited_category = "Cards"
+                elif "upi" in prev_ctx["query"].lower():
+                    inherited_category = "UPI"
+                elif "atm" in prev_ctx["query"].lower():
+                    inherited_category = "ATM"
+                elif "kyc" in prev_ctx["query"].lower():
+                    inherited_category = "KYC"
+                else:
+                    inherited_category = "Account"
+
+            prev_q = prev_ctx["query"]
+            prev_topic = prev_ctx.get("topic") or "Customer Inquiry"
+            clean_title = prev_topic if prev_topic not in ("no_match", "general_guidance", "General Inquiry", "greeting") else prev_q[:40]
+
+            title = f"{inherited_category} Issue: {clean_title} - Escalated to Support"
+
+            description = (
+                f"Customer Query / Need: {prev_q}\n"
+                f"Guidance Provided: {prev_topic}\n"
+                f"Customer Escalation Request: {cleaned_query}\n\n"
+                f"Summary: Customer requested human support escalation for their {inherited_category} request. "
+                f"Ticket automatically opened and routed to {inherited_category} Support for direct investigation and resolution."
+            )
+
+            # Policy
+            cat_topic = find_knowledge_topic(prev_q, category=inherited_category)
+            if not cat_topic:
+                cat_topic = find_knowledge_topic(f"{inherited_category} support", category=inherited_category)
+            policy_note = cat_topic.get("policy", f"Standard {inherited_category} turnaround time guidelines apply.") if cat_topic else f"Standard {inherited_category} dispute procedure."
+            ai_summary = f"Identified category: {inherited_category}. Suggested priority: High. Applicable policy: {policy_note}"
+
+            priority = "High" if inherited_category in ("ATM", "Cards") else "Normal"
+
+            ticket = create_and_route_ticket(
+                db=db,
+                customer=customer,
+                title=title,
+                description=description,
+                category=inherited_category,
+                priority=priority,
+                ai_summary=ai_summary,
+                case_type="Complaint",
+            )
+            ticket_data = format_ticket_dict(ticket)
+
+            assigned_team = ticket.assigned_tier
+            assignee_text = f"assigned to our {assigned_team} team"
+            if ticket.assigned_to:
+                assignee_text += f" (Specialist: {ticket.assigned_to.username})"
+
+            created_dt = ticket.created_at or datetime.now(timezone.utc)
+            deadline_dt = ticket.sla_deadline or (created_dt + timedelta(hours=ticket.sla_hours))
+            created_str = created_dt.strftime("%d %b %Y, %I:%M %p")
+            deadline_str = deadline_dt.strftime("%d %b %Y, %I:%M %p")
+
+            answer_text = (
+                f"I have escalated your request and registered a priority support ticket for your **{inherited_category}** case:\n\n"
+                f"📋 **Ticket Reference:** #{ticket.ticket_number}\n"
+                f"🔹 **Category:** {ticket.category}\n"
+                f"🔹 **Case Type:** {ticket.case_type}\n"
+                f"🔹 **Title:** {ticket.title}\n"
+                f"🔹 **Assigned Desk:** {assignee_text}\n"
+                f"🕐 **Ticket Created:** {created_str}\n"
+                f"⏱️ **SLA Resolution Window:** {ticket.sla_hours} Hours (RBI/NPCI Standard)\n"
+                f"📅 **Target Resolution Deadline:** {deadline_str}\n\n"
+                f"Our **{inherited_category} support executive** has been assigned with your complete request and will investigate within the {ticket.sla_hours}-hour SLA window. You can track this ticket anytime from your Overview tab."
+            )
+
+            return finalize({
+                "answer": answer_text,
+                "mode": "banking_agent",
+                "source": f"Escalated Support ({inherited_category})",
+                "category": inherited_category,
+                "intent": f"{inherited_category}_ESCALATED_TO_SUPPORT",
+                "case_type": "Complaint",
+                "clarification_options": [],
+                "ticket_created": True,
+                "ticket": ticket_data,
+            })
+        else:
+            answer_text = (
+                "Which banking service or department would you like to escalate your request to?\n\n"
+                "• 💳 **Debit & Credit Cards** (block card, unauthorized charge, PIN)\n"
+                "• 💸 **UPI & Digital Payments** (failed transaction, refund, UPI PIN)\n"
+                "• 🏧 **ATM Cash Withdrawals** (cash not dispensed, swallowed card)\n"
+                "• 📄 **Account & Balance** (statements, balance hold, transfer timings)\n"
+                "• 📑 **KYC & Account Access** (re-KYC update, dormant account)\n\n"
+                "Select a department below and I will immediately register a support ticket for you:"
+            )
+            return finalize({
+                "answer": answer_text,
+                "mode": "banking_agent",
+                "source": "Escalation Desk",
+                "category": "General",
+                "intent": "ESCALATION_NEEDS_CATEGORY",
+                "case_type": "Inquiry",
+                "clarification_options": [
+                    "Connect to Cards Support",
+                    "Connect to UPI Support",
+                    "Connect to ATM Support",
+                    "Connect to Account Support",
+                    "Connect to KYC Support",
+                ],
+                "ticket_created": False,
+                "ticket": None,
+            })
+
+    # -------------------------------------------------------------
+    # CASE: Unresolved Guidance / Solution Did Not Work Escalation
+    # e.g., "this solution not working", "it didn't work", "still not working"
+    # -------------------------------------------------------------
+    if is_unresolved_solution_followup(cleaned_query):
+        prev_ctx = get_previous_turn_context(customer.id if customer else 0, history, current_query=cleaned_query)
+        if prev_ctx and prev_ctx.get("query"):
+            inherited_category = prev_ctx.get("category") or "General"
+            if inherited_category in ("General", "Account", None):
+                detected = detect_category(prev_ctx["query"])
+                if detected and detected != "General":
+                    inherited_category = detected
+                elif "upi" in prev_ctx["query"].lower():
+                    inherited_category = "UPI"
+                elif "atm" in prev_ctx["query"].lower():
+                    inherited_category = "ATM"
+                elif "card" in prev_ctx["query"].lower():
+                    inherited_category = "Cards"
+                elif "kyc" in prev_ctx["query"].lower():
+                    inherited_category = "KYC"
+                else:
+                    inherited_category = "Account"
+
+            prev_q = prev_ctx["query"]
+            prev_topic = prev_ctx.get("topic") or "Self-service Guidance"
+
+            clean_prev_title = prev_topic if prev_topic not in ("no_match", "general_guidance", "General Inquiry", "greeting") else prev_q[:40]
+            title = f"{inherited_category} Issue: {clean_prev_title} - Solution Not Working"
+
+            description = (
+                f"Original Customer Request: {prev_q}\n"
+                f"AI Knowledge Guidance Provided: {prev_topic}\n"
+                f"Customer Feedback / Problem: {cleaned_query}\n\n"
+                f"Summary: The customer followed the automated banking instructions provided by BankAssist AI, "
+                f"but reported that the solution did not resolve their issue. Automatically escalated to "
+                f"{inherited_category} L1 Support for manual review, system verification, and direct assistance."
+            )
+
+            # Policy guidance for inherited category
+            cat_topic = find_knowledge_topic(prev_q, category=inherited_category)
+            if not cat_topic:
+                cat_topic = find_knowledge_topic(f"{inherited_category} support", category=inherited_category)
+            policy_note = cat_topic.get("policy", f"Standard {inherited_category} turnaround time guidelines apply.") if cat_topic else f"Standard {inherited_category} dispute escalation procedure."
+            ai_summary = f"Identified category: {inherited_category}. Suggested priority: Normal. Applicable policy: {policy_note}"
+
+            priority = "High" if inherited_category in ("ATM", "Cards") else "Normal"
+
+            ticket = create_and_route_ticket(
+                db=db,
+                customer=customer,
+                title=title,
+                description=description,
+                category=inherited_category,
+                priority=priority,
+                ai_summary=ai_summary,
+                case_type="Complaint",
+            )
+            ticket_data = format_ticket_dict(ticket)
+
+            assigned_team = ticket.assigned_tier
+            assignee_text = f"assigned to our {assigned_team} team"
+            if ticket.assigned_to:
+                assignee_text += f" (Specialist: {ticket.assigned_to.username})"
+
+            created_dt = ticket.created_at or datetime.now(timezone.utc)
+            deadline_dt = ticket.sla_deadline or (created_dt + timedelta(hours=ticket.sla_hours))
+            created_str = created_dt.strftime("%d %b %Y, %I:%M %p")
+            deadline_str = deadline_dt.strftime("%d %b %Y, %I:%M %p")
+
+            answer_text = (
+                f"I understand that the solution provided for your **{inherited_category}** query (_{prev_q}_) did not resolve the issue.\n\n"
+                f"I have escalated your case and registered a priority support ticket with our specialist team:\n\n"
+                f"📋 **Ticket Reference:** #{ticket.ticket_number}\n"
+                f"🔹 **Category:** {ticket.category}\n"
+                f"🔹 **Case Type:** {ticket.case_type}\n"
+                f"🔹 **Title:** {ticket.title}\n"
+                f"🔹 **Assigned Desk:** {assignee_text}\n"
+                f"🕐 **Ticket Created:** {created_str}\n"
+                f"⏱️ **SLA Resolution Window:** {ticket.sla_hours} Hours (RBI/NPCI Standard)\n"
+                f"📅 **Target Resolution Deadline:** {deadline_str}\n\n"
+                f"Our specialized **{inherited_category} support desk** has been assigned with your conversation details and will resolve your case within the {ticket.sla_hours}-hour SLA window. You can monitor progress anytime from your Overview tab."
+            )
+
+            return finalize({
+                "answer": answer_text,
+                "mode": "banking_agent",
+                "source": f"Escalated Support ({inherited_category})",
+                "category": inherited_category,
+                "intent": f"{inherited_category}_SOLUTION_NOT_WORKING",
+                "case_type": "Complaint",
+                "clarification_options": [],
+                "ticket_created": True,
+                "ticket": ticket_data,
+            })
+        else:
+            answer_text = (
+                "Could you please specify which banking service or solution is not working?\n\n"
+                "For example:\n"
+                "• 💸 **UPI & Digital Payments** (failed transfer, reset UPI PIN)\n"
+                "• 💳 **Debit & Credit Cards** (block card, PIN change, online payments)\n"
+                "• 🏧 **ATM Cash Withdrawals** (cash not dispensed, machine error)\n"
+                "• 📄 **Account & Balance** (statements, balance hold, transfer timings)\n\n"
+                "Once you provide the details or select an option below, I can open a ticket with the right support specialist or provide targeted help."
+            )
+            return finalize({
+                "answer": answer_text,
+                "mode": "banking_agent",
+                "source": "Clarification",
+                "category": "General",
+                "intent": "UNRESOLVED_SOLUTION_NEEDS_CONTEXT",
+                "case_type": "Inquiry",
+                "clarification_options": [
+                    "UPI PIN / Payment Issue",
+                    "ATM Cash Dispense Issue",
+                    "Card Transaction / Block",
+                    "Account Statement / Balance",
+                ],
+                "ticket_created": False,
+                "ticket": None,
+            })
+
+    # -------------------------------------------------------------
+    # CASE: Clarification / Didn't Get / Confusion on Previous Topic
+    # e.g., "i didnt get", "didn't understand", "not clear"
+    # -------------------------------------------------------------
+    if is_clarification_or_didnt_get_followup(cleaned_query):
+        prev_ctx = get_previous_turn_context(customer.id if customer else 0, history, current_query=cleaned_query)
+        if prev_ctx and prev_ctx.get("query"):
+            inherited_category = prev_ctx.get("category") or "General"
+            if inherited_category in ("General", "Account", None):
+                detected = detect_category(prev_ctx["query"])
+                if detected and detected != "General":
+                    inherited_category = detected
+                elif "card" in prev_ctx["query"].lower():
+                    inherited_category = "Cards"
+                elif "upi" in prev_ctx["query"].lower():
+                    inherited_category = "UPI"
+                elif "atm" in prev_ctx["query"].lower():
+                    inherited_category = "ATM"
+                elif "kyc" in prev_ctx["query"].lower():
+                    inherited_category = "KYC"
+                else:
+                    inherited_category = "Account"
+
+            prev_q = prev_ctx["query"]
+            prev_topic = prev_ctx.get("topic") or "Your previous request"
+
+            # CARDS CLARIFICATION:
+            if inherited_category == "Cards":
+                answer_text = (
+                    f"I understand that you need simpler clarification or haven't received what you needed regarding your **Cards** request (_{prev_topic}_).\n\n"
+                    "Here are the immediate steps and options:\n\n"
+                    "1. 📱 **To Block Your Card Right Away:**\n"
+                    "   • **App:** Open your Mobile Banking app > Tap **Cards** > Select Card > Tap **Block Card**.\n"
+                    "   • **SMS:** Send `BLOCK <last 4 digits>` to **567676** from your registered mobile number.\n"
+                    "   • **Helpline:** Call our 24x7 emergency card helpline at **1800-123-4567**.\n\n"
+                    "2. 📬 **Didn't Receive Your Replacement Card?**\n"
+                    "   • Replacement cards are dispatched via speed post within 3 to 5 business days after blocking.\n"
+                    "   • If it has been more than 5 days, our Cards Support desk can track the courier AWB or re-dispatch.\n\n"
+                    "Would you like to open a direct support ticket with our **Cards Specialist (Anita Sharma)** to assist you?"
+                )
+                clarification_options = [
+                    "Connect to Cards Support",
+                    "Block Card Immediately",
+                    "Report Unauthorized Charge",
+                ]
+            # UPI CLARIFICATION:
+            elif inherited_category == "UPI":
+                answer_text = (
+                    f"Let me break down the steps very simply for your **UPI** request (_{prev_topic}_):\n\n"
+                    "1. Open your UPI app (Google Pay / PhonePe / Paytm).\n"
+                    "2. Tap your **Profile picture** > Select your **Bank Account**.\n"
+                    "3. Tap **'Reset UPI PIN'** or **'Forgot PIN'**.\n"
+                    "4. Enter the last 6 digits & expiry date of your Debit Card, then enter the OTP received on SMS.\n"
+                    "5. Set your new 4 or 6 digit UPI PIN.\n\n"
+                    "If you didn't receive the OTP or your payment is stuck, would you like me to connect you to our **UPI Support Specialist (Rajesh Kumar)**?"
+                )
+                clarification_options = [
+                    "Connect to UPI Support",
+                    "Failed UPI Transfer",
+                    "Daily Transaction Limit",
+                ]
+            # ATM CLARIFICATION:
+            elif inherited_category == "ATM":
+                answer_text = (
+                    f"Let me clarify the steps for your **ATM** request (_{prev_topic}_):\n\n"
+                    "• If the ATM **did not dispense cash** but money was debited, the standard auto-reversal timeline is **T+5 business days**.\n"
+                    "• If your **card was retained/swallowed** by the ATM machine, it is securely destroyed for your protection and a replacement is dispatched.\n\n"
+                    "Would you like me to register an ATM dispute ticket with our **ATM Specialist (Suresh Patel)**?"
+                )
+                clarification_options = [
+                    "Connect to ATM Support",
+                    "Cash Not Dispensed",
+                    "ATM Withdrawal Limits",
+                ]
+            # KYC CLARIFICATION:
+            elif inherited_category == "KYC":
+                answer_text = (
+                    f"Let me explain the **KYC verification process** in 3 simple points:\n\n"
+                    "1. **No change in address/details?** Submit a simple online self-declaration via Net Banking or Mobile Banking — no branch visit required.\n"
+                    "2. **Address changed?** Upload your updated Aadhaar via DigiLocker OTP or complete Video KYC.\n"
+                    "3. **Officially Valid Documents:** Passport, Driving License, Aadhaar, or Voter ID.\n\n"
+                    "Would you like our **KYC Specialist (Deepak Verma)** to assist you?"
+                )
+                clarification_options = [
+                    "Connect to KYC Support",
+                    "Periodic Re-KYC Steps",
+                    "Acceptable Documents",
+                ]
+            # ACCOUNT / GENERAL CLARIFICATION:
+            else:
+                answer_text = (
+                    f"Let me clarify this for your **Account** request (_{prev_topic}_):\n\n"
+                    "• You can check real-time available balance on your **Overview** dashboard.\n"
+                    "• Download official PDF statements from Net Banking > Accounts > e-Statement.\n"
+                    "• For funds transfer (NEFT/RTGS/IMPS), ensure the beneficiary IFSC code and account number match.\n\n"
+                    "Would you like to connect to our **Account Specialist (Kavita Rao)** for assistance?"
+                )
+                clarification_options = [
+                    "Connect to Account Support",
+                    "Check Balance & Statement",
+                    "Fund Transfer Timings",
+                ]
+
+            return finalize({
+                "answer": answer_text,
+                "mode": "banking_agent",
+                "source": f"Guidance Clarification ({inherited_category})",
+                "category": inherited_category,
+                "intent": f"{inherited_category}_CLARIFICATION",
+                "case_type": "Inquiry",
+                "clarification_options": clarification_options,
+                "ticket_created": False,
+                "ticket": None,
+            })
 
     # Step 1: Classify Customer Intent & Category
     intent_res = classify_intent(cleaned_query)
@@ -173,7 +674,7 @@ def process_customer_query(
             "• 📑 **Account Access & KYC** (re-KYC verification, dormant accounts)\n\n"
             "If you are facing an issue with any banking service or transaction, please describe it and I will either provide verified guidance or automatically open and route a support ticket for you!"
         )
-        return {
+        return finalize({
             "answer": greeting_msg,
             "mode": "banking_agent",
             "source": "greeting",
@@ -182,7 +683,7 @@ def process_customer_query(
             "clarification_options": [],
             "ticket_created": False,
             "ticket": None,
-        }
+        })
 
     # -------------------------------------------------------------
     # CASE 1: Category Overviews (e.g. from Dashboard Category Cards)
@@ -198,12 +699,13 @@ def process_customer_query(
             "Could you please confirm what specific account assistance you need?\n\n"
             "You can select an option below or type your question."
         )
-        return {
+        return finalize({
             "answer": overview_msg,
             "mode": "banking_agent",
             "source": "Account & Balance Services",
             "category": "Account",
             "intent": "ACCOUNT_CATEGORY_OVERVIEW",
+            "case_type": intent_res.case_type,
             "clarification_options": [
                 "Check Balance & Statement",
                 "Fund Transfer Timings",
@@ -211,7 +713,7 @@ def process_customer_query(
             ],
             "ticket_created": False,
             "ticket": None,
-        }
+        })
 
     if intent_res.intent_name == "UPI_CATEGORY_OVERVIEW":
         overview_msg = (
@@ -222,12 +724,13 @@ def process_customer_query(
             "• 🔑 **Reset UPI PIN:** Go to your UPI app, select the bank account, and verify using the last 6 digits of your debit card and OTP.\n\n"
             "Could you please confirm what UPI assistance you need?"
         )
-        return {
+        return finalize({
             "answer": overview_msg,
             "mode": "banking_agent",
             "source": "UPI & Digital Payments",
             "category": "UPI",
             "intent": "UPI_CATEGORY_OVERVIEW",
+            "case_type": intent_res.case_type,
             "clarification_options": [
                 "Failed UPI Transfer",
                 "Daily Transaction Limit",
@@ -235,7 +738,7 @@ def process_customer_query(
             ],
             "ticket_created": False,
             "ticket": None,
-        }
+        })
 
     if intent_res.intent_name == "ATM_CATEGORY_OVERVIEW":
         overview_msg = (
@@ -246,12 +749,13 @@ def process_customer_query(
             "• 🛑 **Card Swallowed by ATM:** If the ATM machine retained your debit card, the card is destroyed securely for safety and a replacement is dispatched within 3-5 business days.\n\n"
             "Could you please confirm what ATM assistance you need?"
         )
-        return {
+        return finalize({
             "answer": overview_msg,
             "mode": "banking_agent",
             "source": "ATM Withdrawals",
             "category": "ATM",
             "intent": "ATM_CATEGORY_OVERVIEW",
+            "case_type": intent_res.case_type,
             "clarification_options": [
                 "Cash Not Dispensed",
                 "ATM Withdrawal Limits",
@@ -259,7 +763,7 @@ def process_customer_query(
             ],
             "ticket_created": False,
             "ticket": None,
-        }
+        })
 
     if intent_res.intent_name == "CARD_CATEGORY_OVERVIEW":
         overview_msg = (
@@ -270,12 +774,13 @@ def process_customer_query(
             "• 🌐 **Online & International Usage:** Enable or disable domestic online, contactless (tap & pay), or international spending anytime in your app.\n\n"
             "Could you please confirm what card assistance you need?"
         )
-        return {
+        return finalize({
             "answer": overview_msg,
             "mode": "banking_agent",
             "source": "Debit & Credit Cards",
             "category": "Cards",
             "intent": "CARD_CATEGORY_OVERVIEW",
+            "case_type": intent_res.case_type,
             "clarification_options": [
                 "Block Card Immediately",
                 "Report Unauthorized Charge",
@@ -283,7 +788,7 @@ def process_customer_query(
             ],
             "ticket_created": False,
             "ticket": None,
-        }
+        })
 
     if intent_res.intent_name == "KYC_CATEGORY_OVERVIEW":
         overview_msg = (
@@ -294,12 +799,13 @@ def process_customer_query(
             "• 🪪 **Officially Valid Documents:** Passport, Driving License, Proof of possession of Aadhaar, Voter's Identity Card, or NREGA Job Card.\n\n"
             "Could you please confirm what KYC or account access help you need?"
         )
-        return {
+        return finalize({
             "answer": overview_msg,
             "mode": "banking_agent",
             "source": "Account Access & KYC",
             "category": "KYC",
             "intent": "KYC_CATEGORY_OVERVIEW",
+            "case_type": intent_res.case_type,
             "clarification_options": [
                 "Periodic Re-KYC Steps",
                 "Dormant Account Activation",
@@ -307,7 +813,7 @@ def process_customer_query(
             ],
             "ticket_created": False,
             "ticket": None,
-        }
+        })
 
     # -------------------------------------------------------------
     # CASE 1B: Ambiguous Limit Query requiring Clarification
@@ -322,16 +828,17 @@ def process_customer_query(
             "Could you please confirm whether you are asking about **UPI transactions**, **ATM withdrawals**, or **Debit/Credit card usage**?\n\n"
             "I can provide the relevant guidance based on your selection."
         )
-        return {
+        return finalize({
             "answer": clarification_answer,
             "mode": "banking_agent",
             "source": "Daily Transaction Limits",
             "category": "UPI",
             "intent": "DAILY_TRANSACTION_LIMIT",
+            "case_type": intent_res.case_type,
             "clarification_options": ["UPI Transactions", "ATM Withdrawals", "Debit/Credit Cards"],
             "ticket_created": False,
             "ticket": None,
-        }
+        })
 
     # -------------------------------------------------------------
     # CASE 1B: Account Profile / Information Request
@@ -351,19 +858,103 @@ def process_customer_query(
             f"• 🔒 **Security Session:** Protected & encrypted (JWT authenticated)\n\n"
             "You can also review your full account profile, open disputes, and available services anytime on your **Overview** dashboard."
         )
-        return {
+        return finalize({
             "answer": profile_answer,
             "mode": "banking_agent",
             "source": "Account Profile",
             "category": "Account",
             "intent": "ACCOUNT_PROFILE_INQUIRY",
+            "case_type": "Inquiry",
             "clarification_options": [],
             "ticket_created": False,
             "ticket": None,
-        }
+        })
+
+    # -------------------------------------------------------------
+    # CASE 1C: Ticket Status & Support Reply Inquiry
+    # -------------------------------------------------------------
+    ticket_num_match = re.search(r"\b(TK-[A-Za-z0-9\-]+)\b", cleaned_query, re.IGNORECASE)
+    lower_query = cleaned_query.lower()
+    is_status_query = bool(
+        ticket_num_match
+        or "ticket status" in lower_query
+        or "dispute status" in lower_query
+        or "status of my ticket" in lower_query
+        or "track ticket" in lower_query
+        or "support reply" in lower_query
+        or "reply to customer" in lower_query
+        or "check my ticket" in lower_query
+    )
+
+    if is_status_query and customer:
+        query_builder = db.query(Ticket).filter(Ticket.customer_id == customer.id)
+        target_ticket = None
+        if ticket_num_match:
+            searched_num = ticket_num_match.group(1).upper()
+            target_ticket = query_builder.filter(Ticket.ticket_number == searched_num).first()
+        else:
+            target_ticket = query_builder.order_by(Ticket.created_at.desc()).first()
+
+        if target_ticket:
+            desk_info = target_ticket.assigned_to.username if target_ticket.assigned_to else target_ticket.assigned_tier
+            sla_text = target_ticket.sla_deadline.strftime("%d %b %Y, %I:%M %p") if target_ticket.sla_deadline else f"{target_ticket.sla_hours} hours"
+            
+            if target_ticket.resolution_notes:
+                reply_section = f"💬 **Official Bank Reply:**\n> \"{target_ticket.resolution_notes}\""
+            else:
+                reply_section = f"⏳ **Support Status:** Active investigation by {desk_info}. The official resolution reply will be posted within SLA turnaround."
+
+            status_response = (
+                f"Here is the latest live status for your dispute:\n\n"
+                f"🎫 **Ticket Reference:** #{target_ticket.ticket_number}\n"
+                f"📌 **Category:** {target_ticket.category}\n"
+                f"⚡ **Current Status:** {target_ticket.status}\n"
+                f"🎧 **Assigned Support Desk:** {desk_info} ({target_ticket.assigned_tier})\n"
+                f"⏱️ **SLA Target:** {sla_text}\n\n"
+                f"{reply_section}\n\n"
+                "You can also click **'🔍 View Reply'** in your **My Active Disputes** table below to see the full event timeline and attached evidence."
+            )
+            return finalize({
+                "answer": status_response,
+                "mode": "banking_agent",
+                "source": "Ticket Management",
+                "category": target_ticket.category,
+                "intent": "TICKET_STATUS_INQUIRY",
+                "case_type": "Inquiry",
+                "clarification_options": [],
+                "ticket_created": False,
+                "ticket": format_ticket_dict(target_ticket),
+            })
+
+    # -------------------------------------------------------------
+    # CASE 1D: Customer Feedback or Suggestions
+    # -------------------------------------------------------------
+    if intent_res.case_type == "Feedback":
+        feedback_reply = (
+            "🙏 **Thank you for sharing your feedback with BankAssist!**\n\n"
+            "We value your suggestions and experience. Your feedback has been recorded and shared with our customer service and product teams to help us improve our banking services and digital applications.\n\n"
+            "If there is any specific transaction issue, account service, or dispute you would like us to investigate, please let us know anytime!"
+        )
+        return finalize({
+            "answer": feedback_reply,
+            "mode": "banking_agent",
+            "source": "Customer Feedback Desk",
+            "category": "General",
+            "intent": "CUSTOMER_FEEDBACK",
+            "case_type": "Feedback",
+            "clarification_options": [],
+            "ticket_created": False,
+            "ticket": None,
+        })
 
     category = intent_res.category
     priority = intent_res.suggested_priority
+
+    # Inherit active category from prior context if current category is General
+    if category in ("General", None):
+        prev_ctx = get_previous_turn_context(customer.id if customer else 0, history, current_query=cleaned_query)
+        if prev_ctx and prev_ctx.get("category") and prev_ctx["category"] != "General":
+            category = prev_ctx["category"]
 
     # Knowledge retrieval via Vector Database semantic search across 40 scenarios
     vector_matches = search_vector_knowledge(
@@ -425,6 +1016,7 @@ def process_customer_query(
             category=category,
             priority=priority,
             ai_summary=ai_summary,
+            case_type=intent_res.case_type,
         )
 
         ticket_data = format_ticket_dict(ticket)
@@ -450,31 +1042,40 @@ def process_customer_query(
             assigned_team = ticket.assigned_tier
             assignee_text = f"assigned to our {assigned_team} team"
             if ticket.assigned_to:
-                assignee_text += f" (Executive: {ticket.assigned_to.username})"
+                assignee_text += f" (Specialist: {ticket.assigned_to.username})"
+
+            created_dt = ticket.created_at or datetime.now(timezone.utc)
+            deadline_dt = ticket.sla_deadline or (created_dt + timedelta(hours=ticket.sla_hours))
+            created_str = created_dt.strftime("%d %b %Y, %I:%M %p")
+            deadline_str = deadline_dt.strftime("%d %b %Y, %I:%M %p")
 
             answer_text = (
                 f"We have registered your dispute regarding your {category} query.\n\n"
-                f"📋 **Ticket Created:** #{ticket.ticket_number}\n"
+                f"📋 **Ticket Reference:** #{ticket.ticket_number}\n"
                 f"🔹 **Category:** {ticket.category}\n"
+                f"🔹 **Case Type:** {ticket.case_type}\n"
                 f"🔹 **Priority:** {ticket.priority}\n"
-                f"🔹 **Assigned To:** {assignee_text}\n"
-                f"⏱️ **Target Resolution SLA:** {ticket.sla_hours} hours\n\n"
+                f"🔹 **Assigned Desk:** {assignee_text}\n"
+                f"🕐 **Ticket Created:** {created_str}\n"
+                f"⏱️ **SLA Resolution Window:** {ticket.sla_hours} Hours (RBI/NPCI Grounded)\n"
+                f"📅 **Target Resolution Deadline:** {deadline_str}\n\n"
                 f"**Turnaround Guidance:**\n{guidance}\n\n"
-                f"Our banking support executive has been notified and will investigate the transaction logs. You can track this dispute anytime from your Overview tab."
+                f"Our banking support desk has been assigned and will investigate your case within the {ticket.sla_hours}-hour SLA guarantee. You can monitor live progress and upload supporting evidence anytime from your Overview tab."
             )
             if not provider_configured:
                 mode = "banking_agent"
 
-        return {
+        return finalize({
             "answer": answer_text,
             "mode": mode,
             "source": f"Banking Dispute Resolution ({category})",
             "category": category,
             "intent": intent_res.intent_name,
+            "case_type": intent_res.case_type,
             "clarification_options": [],
             "ticket_created": True,
             "ticket": ticket_data,
-        }
+        })
 
     # -------------------------------------------------------------
     # CASE 3: Query is informational (guidance, limits, how-to)
@@ -516,16 +1117,17 @@ def process_customer_query(
         else:
             source = topic["title"] if topic else "general_guidance"
 
-        return {
+        return finalize({
             "answer": answer_text,
             "mode": mode,
             "source": source,
             "category": category,
             "intent": intent_res.intent_name,
+            "case_type": intent_res.case_type,
             "clarification_options": [],
             "ticket_created": False,
             "ticket": None,
-        }
+        })
 
 
 # Maintain backward compatibility for any existing code calling answer_question

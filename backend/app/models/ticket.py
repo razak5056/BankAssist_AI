@@ -15,6 +15,7 @@ class Ticket(Base):
     title = Column(String(255), nullable=False)
     description = Column(Text, nullable=False)
     category = Column(String(50), nullable=False)  # UPI, ATM, Cards, Account, KYC
+    case_type = Column(String(50), default="Complaint", nullable=False)  # Complaint, Service Request, Inquiry, Feedback
     priority = Column(String(20), default="Normal", nullable=False)  # Low, Normal, High, Urgent
     status = Column(String(50), default="Assigned", nullable=False)  # Open, Assigned, In Progress, Escalated to L2, Escalated to L3, Resolved, Closed
 

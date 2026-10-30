@@ -26,4 +26,5 @@ def ask_banking_agent(
         db=db,
         customer=current_user,
         question=payload.question.strip(),
+        history=payload.history,
     )

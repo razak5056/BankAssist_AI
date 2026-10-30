@@ -220,11 +220,11 @@
                     <th>TICKET #</th>
                     <th>CATEGORY</th>
                     <th>TITLE</th>
-                    <th>PRIORITY</th>
-                    <th>ASSIGNED TIER</th>
                     <th>STATUS</th>
-                    <th>SLA DEADLINE</th>
-                    <th>EVIDENCE</th>
+                    <th>ASSIGNED DESK</th>
+                    <th>OFFICIAL BANK REPLY</th>
+                    <th>SLA & RESOLUTION DEADLINE</th>
+                    <th>ACTIONS</th>
                   </tr>
                 </thead>
                 <tbody id="customer-disputes-body">
@@ -247,6 +247,83 @@
       </section>
     </main>
   </div>
+
+  <!-- Customer Dispute Detail & Official Support Reply Modal -->
+  <div id="customer-ticket-modal" class="modal-overlay hidden" style="position:fixed;inset:0;background:rgba(15,23,42,0.65);backdrop-filter:blur(4px);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;">
+    <div class="modal-content" style="background:#fff;border-radius:12px;max-width:700px;width:100%;max-height:92vh;overflow-y:auto;box-shadow:0 25px 50px -12px rgba(0,0,0,0.25);padding:24px;border:1px solid #cbd5e1;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:1px solid #e2e8f0;padding-bottom:14px;margin-bottom:16px;">
+        <div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <h2 id="custmodal-ticket-num" style="margin:0;font-size:1.3rem;color:#0f172a;font-weight:700;">TK-XXXXX</h2>
+            <span id="custmodal-priority-badge" class="ticket-badge-pill">Normal</span>
+            <span id="custmodal-status-badge" class="ticket-badge-pill">Assigned</span>
+          </div>
+          <p id="custmodal-ticket-title" style="margin:4px 0 0;color:#64748b;font-size:0.95rem;">Customer Issue Title</p>
+        </div>
+        <button type="button" id="close-customer-ticket-modal" style="background:none;border:none;font-size:1.75rem;cursor:pointer;color:#94a3b8;line-height:1;">&times;</button>
+      </div>
+
+      <!-- Official Bank Response / Support Executive Reply -->
+      <div style="margin-bottom:20px;">
+        <h4 style="margin:0 0 8px;font-size:0.85rem;text-transform:uppercase;letter-spacing:0.05em;color:#15803d;display:flex;align-items:center;gap:6px;">
+          <span>💬</span> Official Bank Response / Support Reply
+        </h4>
+        <div id="custmodal-reply-box" style="background:#f0fdf4;border:1.5px solid #86efac;padding:16px;border-radius:8px;font-size:0.92rem;color:#166534;line-height:1.5;">
+          <!-- Dynamically populated -->
+        </div>
+      </div>
+
+      <!-- Interactive Customer Reply to Support (when more details are needed) -->
+      <div id="custmodal-reply-input-section" style="margin-bottom:20px;background:#f0f9ff;border:1.5px solid #bae6fd;padding:16px;border-radius:8px;">
+        <h4 style="margin:0 0 6px;font-size:0.85rem;text-transform:uppercase;letter-spacing:0.05em;color:#0369a1;display:flex;align-items:center;gap:6px;">
+          <span>✍️</span> Respond to Support Executive / Submit Additional Details
+        </h4>
+        <p style="margin:0 0 10px;font-size:0.8rem;color:#475569;">If the banking executive requested transaction numbers, receipts, or clarifications, type your answer or attach files below:</p>
+        <form id="customer-reply-form" style="display:flex;flex-direction:column;gap:10px;">
+          <input type="hidden" id="custmodal-hidden-id" />
+          <textarea id="customer-reply-text" rows="2" placeholder="e.g. My 12-digit UPI UTR is 423987123456. Transaction was attempted at 2:15 PM today..." style="width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:6px;font-size:0.875rem;resize:vertical;font-family:inherit;background:#fff;" required></textarea>
+          <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+            <button type="button" id="custmodal-upload-btn" class="action-btn-sm" style="padding:7px 12px;background:#fff;color:#0369a1;border:1px solid #bae6fd;">📎 Attach Statement / Receipt</button>
+            <button type="submit" id="customer-send-reply-btn" class="action-btn-sm action-btn-resolve" style="padding:7px 16px;font-weight:700;">Send Details to Support Desk ➔</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- Ticket Metadata Grid -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;background:#f8fafc;padding:14px;border-radius:8px;margin-bottom:16px;font-size:0.875rem;border:1px solid #e2e8f0;">
+        <div><strong style="color:#475569;">Case Type:</strong> <span id="custmodal-case-type" style="color:#991b1b;font-weight:700;">Complaint</span></div>
+        <div><strong style="color:#475569;">Category:</strong> <span id="custmodal-category">—</span></div>
+        <div><strong style="color:#475569;">Assigned Desk:</strong> <span id="custmodal-assigned-desk" style="color:#1d4ed8;font-weight:600;">—</span></div>
+        <div><strong style="color:#475569;">Resolution Tier:</strong> <span id="custmodal-tier">—</span></div>
+        <div><strong style="color:#475569;">Dispute Created:</strong> <span id="custmodal-created">—</span></div>
+        <div><strong style="color:#475569;">SLA Window:</strong> <span id="custmodal-sla-window" style="font-weight:600;color:#2563eb;">—</span></div>
+        <div><strong style="color:#475569;">Resolution Deadline:</strong> <span id="custmodal-deadline" style="font-weight:700;color:#0f172a;">—</span></div>
+        <div><strong style="color:#475569;">SLA Live Status:</strong> <span id="custmodal-sla-status">—</span></div>
+        <div style="grid-column: 1 / -1;"><strong style="color:#475569;">Attached Evidence:</strong> <span id="custmodal-evidence-link">—</span></div>
+      </div>
+
+      <!-- Customer Complaint Description -->
+      <div style="margin-bottom:16px;">
+        <h4 style="margin:0 0 6px;font-size:0.85rem;text-transform:uppercase;letter-spacing:0.05em;color:#475569;">Your Complaint Details</h4>
+        <div id="custmodal-description" style="background:#fff;border:1px solid #e2e8f0;padding:12px;border-radius:8px;font-size:0.9rem;color:#1e293b;line-height:1.5;white-space:pre-wrap;"></div>
+      </div>
+
+      <!-- AI Analysis & Regulatory Guidance -->
+      <div style="margin-bottom:16px;">
+        <h4 style="margin:0 0 6px;font-size:0.85rem;text-transform:uppercase;letter-spacing:0.05em;color:#0369a1;">AI Guidance & Regulatory TAT</h4>
+        <div id="custmodal-ai-summary" style="background:#f0f9ff;border:1px solid #bae6fd;padding:12px;border-radius:8px;font-size:0.875rem;color:#0369a1;line-height:1.5;"></div>
+      </div>
+
+      <!-- Audit History / Timeline -->
+      <div style="margin-bottom:10px;">
+        <h4 style="margin:0 0 6px;font-size:0.85rem;text-transform:uppercase;letter-spacing:0.05em;color:#475569;">Resolution Timeline & Events</h4>
+        <div id="custmodal-history-list" style="max-height:150px;overflow-y:auto;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;font-size:0.8rem;color:#475569;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Hidden evidence file input -->
+  <input type="file" id="evidence-file-input" style="display:none;" accept=".pdf,.png,.jpg,.jpeg,.doc,.docx" />
 </body>
 </html>
 

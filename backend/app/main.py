@@ -12,9 +12,10 @@ from backend.app.api.tickets import router as tickets_router
 from backend.app.core.auth import get_current_user, require_role, require_roles
 from backend.app.db.database import get_db
 from backend.app.models.role import Role
-from backend.app.models.ticket import Ticket
+from backend.app.models.ticket import Ticket, TicketHistory
 from backend.app.models.user import User
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 
 app = FastAPI(
     title="BankAssist AI",
@@ -127,6 +128,36 @@ def l1_support_dashboard(
 ):
     assigned_to_me = db.query(Ticket).filter(Ticket.assigned_to_id == current_user.id, Ticket.status.notin_(["Resolved", "Closed"])).count()
     awaiting_response = db.query(Ticket).filter(Ticket.assigned_to_id == current_user.id, Ticket.status.in_(["Open", "Assigned", "In Progress"])).count()
+    
+    escalated_subquery = (
+        db.query(TicketHistory.ticket_id)
+        .filter(TicketHistory.action == "ESCALATED", TicketHistory.actor_id == current_user.id)
+    )
+    email_or_name = (current_user.email + " " + current_user.username).lower()
+    cat_keywords = []
+    if "kavita" in email_or_name or "acc" in email_or_name:
+        cat_keywords = ["account", "card", "balance"]
+    elif "rajesh" in email_or_name or "upi" in email_or_name:
+        cat_keywords = ["upi", "digital"]
+    elif "suresh" in email_or_name or "atm" in email_or_name:
+        cat_keywords = ["atm", "cash"]
+    elif "deepak" in email_or_name or "kyc" in email_or_name:
+        cat_keywords = ["kyc", "access", "verification"]
+
+    conditions = [
+        Ticket.id.in_(escalated_subquery),
+        Ticket.assigned_to_id == current_user.id,
+    ]
+    for kw in cat_keywords:
+        conditions.append(Ticket.category.ilike(f"%{kw}%"))
+
+    escalations_count = (
+        db.query(Ticket)
+        .filter(Ticket.status.like("Escalated%"), or_(*conditions))
+        .distinct()
+        .count()
+    )
+
     return {
         "message": f"Welcome to L1 Support Dashboard - {current_user.username}",
         "support_user": current_user.username,
@@ -134,7 +165,7 @@ def l1_support_dashboard(
         "metrics": {
             "assigned_to_me": assigned_to_me,
             "awaiting_response": awaiting_response,
-            "escalations": 0,
+            "escalations": escalations_count,
         },
     }
 
@@ -146,6 +177,13 @@ def l2_support_dashboard(
 ):
     assigned_to_me = db.query(Ticket).filter(Ticket.assigned_to_id == current_user.id, Ticket.status.notin_(["Resolved", "Closed"])).count()
     awaiting_response = db.query(Ticket).filter(Ticket.assigned_to_id == current_user.id, Ticket.status.in_(["Open", "Assigned", "In Progress", "Escalated to L2"])).count()
+    escalations = db.query(Ticket).filter(
+        Ticket.status.like("Escalated%"),
+        or_(
+            Ticket.assigned_to_id == current_user.id,
+            Ticket.assigned_tier == "L2 Senior Support",
+        )
+    ).distinct().count()
     return {
         "message": f"Welcome to L2 Senior Support Dashboard - {current_user.username}",
         "support_user": current_user.username,
@@ -153,7 +191,7 @@ def l2_support_dashboard(
         "metrics": {
             "assigned_to_me": assigned_to_me,
             "awaiting_response": awaiting_response,
-            "escalations": assigned_to_me,
+            "escalations": escalations,
         },
     }
 

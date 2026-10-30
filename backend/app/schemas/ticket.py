@@ -9,6 +9,7 @@ TicketStatus = Literal[
     "Open",
     "Assigned",
     "In Progress",
+    "Awaiting Customer Response",
     "Escalated",
     "Escalated to L2",
     "Escalated to L3",
@@ -34,11 +35,14 @@ class TicketResponse(BaseModel):
     title: str
     description: str
     category: str
+    case_type: Optional[str] = "Complaint"
     priority: str
     status: str
     assigned_tier: str
     sla_hours: int
     sla_deadline: Optional[datetime] = None
+    sla_remaining_hours: Optional[float] = None
+    sla_status: Optional[str] = "On Track"
     ai_summary: Optional[str] = None
     resolution_notes: Optional[str] = None
     evidence_filename: Optional[str] = None
@@ -61,4 +65,9 @@ class TicketStatusUpdate(BaseModel):
     resolution_notes: Optional[str] = Field(None, max_length=1000)
     escalate: bool = False
     escalation_reason: Optional[str] = Field(None, max_length=500)
+
+
+class CustomerTicketReply(BaseModel):
+    message: str = Field(..., min_length=2, max_length=1000)
+
 
